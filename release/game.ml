@@ -34,7 +34,16 @@ let handle_move s m = let (board, player_list, turn, (color, curr_req)) = s in
     match m with
     | Action a ->
       match a with
-      | RollDice ->
+      | RollDice -> let roll_num = Util.random_roll () in
+        let new_turn = {  (* Update turn with roll number *)
+          active = turn.active;
+          dicerolled = Some roll_num;
+          cardplayed = turn.cardplayed;
+          cardsbought = turn.cardsbought;
+          tradesmade = turn.tradesmade;
+          pendingtrade = turn.pendingtrade
+        } in
+        (None, (board, player_list, new_turn, (color, curr_req)))
       | MaritimeTrade (resource1, resource2) -> failwith "Not yet"
       | DomesticTrade (color, cost1, cost2) -> failwith "Not yet"
       | BuyBuild b -> failwith "Not yet"
