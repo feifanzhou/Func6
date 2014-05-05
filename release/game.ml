@@ -51,8 +51,59 @@ let handle_move s m = let (board, player_list, turn, (color, curr_req)) = s in
       | Action a ->
         match a with
         | RollDice -> let roll_num = Util.random_roll () in
-          if roll_num = cROLL_ROBBER
-          then (None, s') (* Do nothing for now *)
+          if roll_num = cROLL_ROBBER then (None, s') (* Do nothing for now *)
+            let new_robber_loc = Random.int cMAX_PIECE_NUM in
+            (* TODO: Discard if over cMAX_HAND_SIZE *)
+            let active_color = turn.active in
+            let hex_corners = Util.piece_corners new_robber_loc in
+            let settlements = fst (snd board) in
+            let rec adjacent_settlement_color corners = match corners with
+              (* Loop through all corner tiles *)
+              (* Try to find settlements at those corners *)
+              (* If there is a settlement, look at the color of the settlement *)
+              (* If not the same as the current color, return that color *)
+              (* If nothing found, return None *)
+              | h::t -> match List.nth h with
+                | None -> adjacent_settlement_color t
+                | Some (color, stlmt) -> if color <> active_color then Some color else adjacent_settlement_color t
+              | [] -> None
+            in let adj_color = adjacent_settlement_color hex_corners in
+            (* Rob target player *)
+            let rec rob_player plist = match plist with (* Take resource from chosen player *)
+              | h::t -> let (clr, ((b, w, o, g, l), crds), trophs) = h in
+                if clr <> adj_color then rob_player t else
+                (* Tuple with cost, and an option saying if something was able to be robbed *)
+                if b > 0 then ((b - 1, w, o, g, l), Some Brick)
+                else if w > 0 then ((b, w - 1, o, g, l), Some Wool)
+                else if o > 0 then ((b, w, o - 1, g, l), Some Ore)
+                else if g > 0 then ((b, w, o, g - 1, l), Some Grain)
+                else if l > 0 then ((b, w, o, g, l - 1), Some Lumber)
+                else ((b, w, o, g, l), None)
+              | [] -> failwith "No player found for color"
+            in let rob_result = rob_player player_list in (* Tuple of robbed results and the type that was robbed *)
+            (* Benefit current player *)
+            let rec reap_robber_rewards plist = match plist with (* Add taken resource to current player *)
+              | h::t -> let (clr, ((b, w, o, g, l), crds), trophs) = h in
+                if clr <> active_color then rob_player t else
+                match (snd rob_result) with
+                | None -> (b, w, o, g, l) (* Nothing could be robbed *)
+                | Some Brick -> (b + 1, w, o, g, l)
+                | Some Wool -> (b, w + 1, o, g, l)
+                | Some Ore -> (b, w, o + 1, g, l)
+                | Some Grain -> (b, w, o, g + 1, l)
+                | Some Lumber -> (b, w, o, g, l + 1)
+              | [] -> failwith "Player for current color couldn't be found"
+            in let reap_result = reap_robber_rewards player_list in (* Robbed resource added to current player's resources *)
+            (* Generate new state *)
+            let rec recreate_player_list plist acc = match plist with
+              | h::t -> let (clr, (invtr, crds), trophs) = h in
+                if clr <> active_color && clr <> adj_color then recreate_player_list t (h::acc) (* Add current player to new list *)
+                else if clr = active_color then recreate_player_list t ((clr, (reap_result, crds), trophs)::acc) (* Add current player to new list *)
+                else if clr = adj_color then recreate_player_list t ((clr, ((fst rob_result), crds), trophs)::acc) (* Add robbed player to new list *)
+                else failwith "Something wrong with player list and colors"
+              | [] -> List.rev acc (* Everything had been reversed in accumulator, so reversing to get it back *)
+            in let new_player_list = recreate_player_list player_list [] in
+            (None, (board, new_player_list, turn, (color, curr_req))) (* No one wins, but update state *)
           else 
             let new_turn = {  (* Update turn with roll number *)
               active = turn.active;
