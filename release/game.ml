@@ -21,9 +21,10 @@ let rec build_settlement_at_point curr_intersections clr stlmt p index acc =
 let init_game () = game_of_state (gen_initial_state())
 
 
-let handle_move s m = let (board, player_list, turn, (color, curr_req)) = s in
+let handle_move s m =
   Random.self_init ();
   let rec handle_move_helper s' m' = (* Recursive so we can sub in a move for invalid moves *)
+    let (board, player_list, turn, (color, curr_req)) = s' in
     match curr_req with
     | InitialRequest ->
       match m' with 
@@ -33,11 +34,50 @@ let handle_move s m = let (board, player_list, turn, (color, curr_req)) = s in
         let structures = (build_settlement_at_point curr_intrs color Town pt 0 []) in
         let road = (color, (pt, p2)) in
         let new_board = (map, (structures, (road::curr_roads)), deck, disc, robber) in
+        (* TODO: Determine what next request should be *)
         (None, (new_board, player_list, turn, (color, curr_req)))
       | _ -> failwith "Fill in valid moves"
     | RobberRequest ->
       match m' with
-      | RobberMove rm ->
+      | RobberMove (pt, adj_color) ->
+        (* Rob target player *)
+        let rec rob_player plist target_color = match plist with (* Take resource from chosen player *)
+          | h::t -> let (clr, ((b, w, o, g, l), crds), trophs) = h in
+            if clr <> target_color then rob_player t target_color else
+            (* Tuple with cost, and an option saying if something was able to be robbed *)
+            if b > 0 then ((b - 1, w, o, g, l), Some Brick)
+            else if w > 0 then ((b, w - 1, o, g, l), Some Wool)
+            else if o > 0 then ((b, w, o - 1, g, l), Some Ore)
+            else if g > 0 then ((b, w, o, g - 1, l), Some Grain)
+            else if l > 0 then ((b, w, o, g, l - 1), Some Lumber)
+            else ((b, w, o, g, l), None)
+          | [] -> rob_player player_list (next_turn clr) (* Try to rob someone else *)
+        in let rob_result = rob_player player_list adj_color in (* Tuple of robbed results and the type that was robbed *)
+        (* Benefit current player *)
+        let rec reap_robber_rewards plist = match plist with (* Add taken resource to current player *)
+          | h::t -> let (clr, ((b, w, o, g, l), crds), trophs) = h in
+            if clr <> active_color then rob_player t else
+            match (snd rob_result) with
+            | None -> (b, w, o, g, l) (* Nothing could be robbed *)
+            | Some Brick -> (b + 1, w, o, g, l)
+            | Some Wool -> (b, w + 1, o, g, l)
+            | Some Ore -> (b, w, o + 1, g, l)
+            | Some Grain -> (b, w, o, g + 1, l)
+            | Some Lumber -> (b, w, o, g, l + 1)
+          | [] -> failwith "Player for current color couldn't be found"
+        in let reap_result = reap_robber_rewards player_list in (* Robbed resource added to current player's resources *)
+        (* Generate new state *)
+        let rec recreate_player_list plist acc = match plist with
+          | h::t -> let (clr, (invtr, crds), trophs) = h in
+            if clr <> active_color && clr <> adj_color then recreate_player_list t (h::acc) (* Add current player to new list *)
+            else if clr = active_color then recreate_player_list t ((clr, (reap_result, crds), trophs)::acc) (* Add current player to new list *)
+            else if clr = adj_color then recreate_player_list t ((clr, ((fst rob_result), crds), trophs)::acc) (* Add robbed player to new list *)
+            else failwith "Something wrong with player list and colors"
+          | [] -> List.rev acc (* Everything had been reversed in accumulator, so reversing to get it back *)
+        in let new_player_list = recreate_player_list player_list [] in
+        let (mp, str, dk, trash, rbr) = board in
+        let new_board = (mp, str, dk, trash, pt) in (* Update robber position *)
+        (None, (new_board, new_player_list, turn, (color, ActionRequest))) (* No one wins, but update state *)
       | _ -> failwith "Fill in valid moves"
     | DiscardRequest ->
       match m' with
@@ -51,79 +91,67 @@ let handle_move s m = let (board, player_list, turn, (color, curr_req)) = s in
       | Action a ->
         match a with
         | RollDice -> let roll_num = Util.random_roll () in
-          if roll_num = cROLL_ROBBER then (None, s') (* Do nothing for now *)
+          let rolled_turn = {
+            active: turn.active;
+            dicerolled: Some roll_num;
+            cardplayed: turn.cardplayed;
+            cardsbought: turn.cardsbought;
+            tradesmade: turn.tradesmade;
+            pendingtrade: turn.pendingtrade;
+          } in
+          if roll_num = cROLL_ROBBER then
             let new_robber_loc = Random.int cMAX_PIECE_NUM in
-            (* TODO: Discard if over cMAX_HAND_SIZE *)
-            let active_color = turn.active in
-            let hex_corners = Util.piece_corners new_robber_loc in
-            let settlements = fst (snd board) in
-            let rec adjacent_settlement_color corners = match corners with
-              (* Loop through all corner tiles *)
-              (* Try to find settlements at those corners *)
-              (* If there is a settlement, look at the color of the settlement *)
-              (* If not the same as the current color, return that color *)
-              (* If nothing found, return None *)
-              | h::t -> match List.nth h with
-                | None -> adjacent_settlement_color t
-                | Some (color, stlmt) -> if color <> active_color then Some color else adjacent_settlement_color t
-              | [] -> None
-            in let adj_color = adjacent_settlement_color hex_corners in
-            (* Rob target player *)
-            let rec rob_player plist = match plist with (* Take resource from chosen player *)
-              | h::t -> let (clr, ((b, w, o, g, l), crds), trophs) = h in
-                if clr <> adj_color then rob_player t else
-                (* Tuple with cost, and an option saying if something was able to be robbed *)
-                if b > 0 then ((b - 1, w, o, g, l), Some Brick)
-                else if w > 0 then ((b, w - 1, o, g, l), Some Wool)
-                else if o > 0 then ((b, w, o - 1, g, l), Some Ore)
-                else if g > 0 then ((b, w, o, g - 1, l), Some Grain)
-                else if l > 0 then ((b, w, o, g, l - 1), Some Lumber)
-                else ((b, w, o, g, l), None)
-              | [] -> failwith "No player found for color"
-            in let rob_result = rob_player player_list in (* Tuple of robbed results and the type that was robbed *)
-            (* Benefit current player *)
-            let rec reap_robber_rewards plist = match plist with (* Add taken resource to current player *)
-              | h::t -> let (clr, ((b, w, o, g, l), crds), trophs) = h in
-                if clr <> active_color then rob_player t else
-                match (snd rob_result) with
-                | None -> (b, w, o, g, l) (* Nothing could be robbed *)
-                | Some Brick -> (b + 1, w, o, g, l)
-                | Some Wool -> (b, w + 1, o, g, l)
-                | Some Ore -> (b, w, o + 1, g, l)
-                | Some Grain -> (b, w, o, g + 1, l)
-                | Some Lumber -> (b, w, o, g, l + 1)
-              | [] -> failwith "Player for current color couldn't be found"
-            in let reap_result = reap_robber_rewards player_list in (* Robbed resource added to current player's resources *)
-            (* Generate new state *)
-            let rec recreate_player_list plist acc = match plist with
+            (* Discard if anyone is over cMAX_HAND_SIZE *)
+            let rec who_is_over_max_hand_size plist acc = match plist with
               | h::t -> let (clr, (invtr, crds), trophs) = h in
-                if clr <> active_color && clr <> adj_color then recreate_player_list t (h::acc) (* Add current player to new list *)
-                else if clr = active_color then recreate_player_list t ((clr, (reap_result, crds), trophs)::acc) (* Add current player to new list *)
-                else if clr = adj_color then recreate_player_list t ((clr, ((fst rob_result), crds), trophs)::acc) (* Add robbed player to new list *)
-                else failwith "Something wrong with player list and colors"
-              | [] -> List.rev acc (* Everything had been reversed in accumulator, so reversing to get it back *)
-            in let new_player_list = recreate_player_list player_list [] in
-            (None, (board, new_player_list, turn, (color, curr_req))) (* No one wins, but update state *)
-          else 
-            let new_turn = {  (* Update turn with roll number *)
-              active = turn.active;
-              dicerolled = Some roll_num;
-              cardplayed = turn.cardplayed;
-              cardsbought = turn.cardsbought;
-              tradesmade = turn.tradesmade;
-              pendingtrade = turn.pendingtrade
-            } in (* TODO: Do resources get generated as part of this move or the next one? *)
-            (None, (board, player_list, new_turn, (color, curr_req)))
+                if Util.sum_cost invtr > cMAX_HAND_SIZE then ((true, Some clr)::acc) else is_over_max_hand_size t
+              | [] -> List.rev acc (* Keep everything in order *)
+            in let hogs = who_is_over_max_hand_size player_list in
+            if List.length hogs > 0 then (* Some people have too many resources *)
+              (* Someone has too many resources *)
+              let first_hoarder_color = match List.hd hogs with
+                | (b, Some c) -> c
+                | _ -> failwith "Inconsistent results for hoaders"
+              in (None, (board, player_list, rolled_turn, (first_hoarder_color, DiscardRequest))) (* Send discard request *)
+            else 
+              let active_color = turn.active in
+              let hex_corners = Util.piece_corners new_robber_loc in
+              let settlements = fst (snd board) in
+              let rec adjacent_settlement_color corners = match corners with
+                (* Loop through all corner tiles *)
+                (* Try to find settlements at those corners *)
+                (* If there is a settlement, look at the color of the settlement *)
+                (* If not the same as the current color, return that color *)
+                (* If nothing found, return None *)
+                | h::t -> match List.nth h with
+                  | None -> adjacent_settlement_color t
+                  | Some (color, stlmt) -> if color <> active_color then Some color else adjacent_settlement_color t
+                | [] -> None
+              in let adj_color = adjacent_settlement_color hex_corners in
+              (None, (board, player_list, rolled_turn, (color, RobberRequest)))
+          else (* Didn't roll robber *)
+            (* TODO: Do resources get generated as part of this move or the next one? *)
+            (None, (board, player_list, rolled_turn, (color, ActionRequest)))
         | MaritimeTrade (resource1, resource2) -> failwith "Not yet"
         | DomesticTrade (color, cost1, cost2) -> failwith "Not yet"
         | BuyBuild b -> failwith "Not yet"
         | PlayCard pc -> failwith "Not yet"
         | EndTurn -> 
             match turn.dicerolled with
-            | Some _ -> (None, s') (* Nothing changed so end turn *)
+            | Some _ -> (* Dice rolled, end turn *)
+              let new_turn = {  (* Update active player color *)
+                active: (next_turn turn.active);
+                dicerolled: turn.dicerolled;
+                cardplayed: turn.cardplayed;
+                cardsbought: turn.cardsbought;
+                tradesmade: turn.tradesmade;
+                pendingtrade: turn.pendingtrade;
+              } in
+              let new_state = (board, player_list, new_turn, ((next_turn color), ActionRequest)) in
+              (None, new_state)
             (* If no dice has been rolled, substitute dice roll move because dice roll is required for turn *)
             | None -> handle_move_helper (board, player_list, turn, (color, ActionRequest)) (Action RollDice)
-      | _ -> (None, s') (* Action end turn *)
+      | _ -> handle_move (board, player_list, turn, (color, ActionRequest)) (Action EndTurn) (* Action end turn *)
   in handle_move_helper s m
 
 let presentation s = failwith "Were not too much to pay for birth."
