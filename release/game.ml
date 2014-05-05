@@ -80,9 +80,37 @@ let handle_move s m =
         (None, (new_board, new_player_list, turn, (color, ActionRequest))) (* No one wins, but update state *)
       | _ -> failwith "Fill in valid moves"
     | DiscardRequest ->
-      match m' with
-      | DiscardMove (cost_b, cost_w, cost_o, cost_g, cost_l) ->
-      | _ -> failwith "Fill in valid moves"
+      (* TODO: If resources < threshold, pass to next player *)
+      let rec get_current_player_resource_count plist = match plist with
+        | (clr, (curr_inv, curr_cards), troph)::t -> 
+          if clr <> color
+          then get_current_player_resource_count t
+          else sum_cost curr_inv (* Found target player, getting sum of resources *)
+        | [] -> failwith "Couldn't find requested player color. Weird"
+      in let curr_resource_count = get_current_player_resource_count player_list in
+      if curr_resource_count <= cMAX_HAND_SIZE (* No need to discard, try next player *)
+      then (None, (board, player_list, turn, ((next_turn color), DiscardRequest)))
+      else (* Current player needs to discard *)
+        match m' with
+        | DiscardMove (cost_b, cost_w, cost_o, cost_g, cost_l) ->
+          let rec get_current_player plist = match plist with
+            | (clr, hnd, troph)::t -> if clr = color then (clr, hnd, troph) else get_current_player t
+            | [] -> failwith "Couldn't find player for a color. Weird."
+          in (curr_clr, (curr_inv, curr_cards), curr_troph) = get_current_player player_list in
+          let (curr_b, curr_w, curr_o, curr_g, curr_l) = curr_inv in
+          (* TODO: Error checking — differences shouldn't be negative for example *)
+          let new_inventory = (curr_b - cost_b, curr_w - cost_w, curr_o - cost_o, curr_g - cost_g, curr_l - cost_l) in
+          let rec generate_new_player_list plist acc = match plist with
+            | (clr, hnd, troph)::t -> 
+              if clr = color (* Is discarding player, update inventory in player list *)
+              then generate_new_player_list t ((clr, (new_inventory, curr_cards), troph)::acc)
+              else generate_new_player_list t ((clr, hnd, troph)::acc)  (* Just put same entry back in *)
+            | [] -> List.rev acc (* Maintain player list order *)
+          in new_player_list = generate_new_player_list player_list [] in
+          if color <> White (* Not last player in order, get next one to try discarding resources *)
+          then (None, (board, new_player_list, turn, ((next_turn color), DiscardRequest)))
+          else (None, (board, new_player_list, turn, (turn.active, RobberRequest))) (* Pass control back to active player with RobberRequest *)
+        | _ -> failwith "Fill in valid moves"
     | TradeRequest ->
       | TradeResponse b ->
       | _ -> failwith "Fill in valid moves"
