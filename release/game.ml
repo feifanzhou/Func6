@@ -139,7 +139,7 @@ let handle_move s m =
           pendingtrade: None
         } in
         if not b then <> (* Trade rejected, try another move *)
-          (None, (board, player_list, new_turn, (color, ActionRequest)))
+          (None, (board, player_list, new_turn, (turn.active, ActionRequest)))
         else (* Conduct trade *) let (clr, c1, c2) = turn.pendingtrade in
           (* Current player's resources checked in DomesticTrade action handler below *)
           let (cb1, cw1, co1, cg1, cl1) = c1 in
@@ -147,14 +147,22 @@ let handle_move s m =
           let (tcb, tcw, tco, tcg, tcl) = get_player_inventory player_list clr in 
           (* Check if target player has enough resources to satisfy trade *)
           if (tcb < cb2) || (tcw < cw2) || (tco < co2) || (tcg < cg2) || (tcl < cl2)
-          then (None, (board, player_list, new_turn, (color, ActionRequest)))
+          then (None, (board, player_list, new_turn, (turn.active, ActionRequest)))
           else (* update inventories, save, outcome *)
             let new_p2_inventory = ((tcb - cb2 + cb1), (tcw - cw2 + cw1), (tco - co2 + co1), (tcg - cg2 + cg1), (tcl - cl2 + cl1)) in
             let (ccb, ccw, cco, ccg, ccl) = get_player_inventory player_list color in
             let new_p1_inventory = ((ccb - cb1 + cb2), (ccw - cw1 + cw2), (cco - co1 + co2), (ccg - cg1 + cg2), (ccl - cl1 + cl2)) in
             let new_player_list = update_player_inventory player_list new_p2_inventory clr [] in
             let new_player_list' = update_player_inventory new_player_list new_p1_inventory color [] in
-            (None, (board, new_player_list', new_turn, (color, ActionRequest)))
+            let new_turn_with_trade_count = {
+              active: turn.active;
+              dicerolled: turn.dicerolled;
+              cardplayed: turn.cardplayed;
+              cardsbought: turn.cardsbought;
+              tradesmade: (turn.tradesmade + 1);
+              pendingtrade: None
+            }
+            (None, (board, new_player_list', new_turn_with_trade_count, (turn.active, ActionRequest)))
     | ActionRequest -> 
       match m' with
       | Action a ->
@@ -234,7 +242,22 @@ let handle_move s m =
               in let new_player_list = update_player_inventory player_list new_inventory color [] in
               (None, (board, new_player_list, turn, (color, ActionRequest)))
 
-        | DomesticTrade (color, cost1, cost2) -> failwith "Not yet"
+        | DomesticTrade (target_color, cost1, cost2) -> (* Need to check if max trades exceeded or if player has enough inventory *)
+          let bail_move = (None, (board, player_list, turn, (color, ActionRequest))) in
+          if turn.tradesmade > cNUM_TRADES_PER_TURN then bail_move
+          else (* Check current player inventory *)
+            let (cb, cw, co, cg, cl) = get_player_inventory player_list color in 
+            let (cb1, cw1, co1, cg1, cl1) = cost1 in
+            if (cb < cb1) || (cw < cw1) || (co < co1) || (cg < cg1) || (cl < cl1) then bail_move
+            else let new_turn = {
+              active: turn.active;
+              dicerolled: turn.dicerolled;
+              cardplayed: turn.cardplayed;
+              cardsbought: turn.cardsbought;
+              tradesmade: turn.tradesmade;
+              pendingtrade: Some (target_color, cost1, cost2);
+            } in
+            (None, (board, player_list, new_turn, (target_color, TradeRequest)))
         | BuyBuild b -> failwith "Not yet"
         | PlayCard pc -> match pc with (* TODO: Something about knights and army size? *)
           | PlayKnight (rbrmv) -> handle_move_helper (board, player_list, turn, (color, RobberRequest)) (RobberMove(rbrmv))
