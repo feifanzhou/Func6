@@ -118,6 +118,52 @@ let current_player_has_road_at_point road_list active_color point =
     | [] -> false
   in helper my_roads
 
+let all_settlement_locations brd = 
+  let strs = snd brd in
+  let itrs = fst strs in 
+  (* Go through intersections *)
+  let rec helper lst index acc = match lst with
+    | h::t -> match h with
+      | None -> helper t (index + 1) acc (* No settlement, check next intersection *)
+      | Some (clr, stlmt) -> helper t (index + 1) (index::acc) (* Found settlement, adding index to list *)
+    | [] -> List.rev acc (* Maintain order, because why not *)
+  in helper itrs 0 []
+let settlement_points_of_type_for_player stlmt_type brd active_color = (* List of points *)
+  let strs = snd brd in
+  let itrs = fst strs in
+  (* Go through intersections *)
+  let rec helper lst acc index = match lst with
+    | h::t -> match h with
+      | None -> helper t acc
+      | Some (clr, stlmt) -> if (stlmt = stlmt_type) && (clr = active_col) then helper t (index::acc) (index + 1) else helper t acc (index + 1)
+    | [] -> List.rev acc (* Maintain order *)
+  in helper itrs []
+let has_settlement_type_at_point pt board stlmt_type active_color = 
+  let curr_locs = settlement_points_of_type_for_player stlmt_type board active_color in
+  List.exists (fun p -> p = pt) curr_locs
+let is_adjacent_to_locations req_point locs = 
+  let rec helper lcs = match lcs with
+    | h::t -> let adj_points = adjacent_points h in (* Get adjacent locatinos for every location in locs *)
+      (* If any location is equal to req_point, then req_point is adjacent to a point in locs *)
+      let rec subhelper lcs' = match lcs' with
+        | h::t -> if h = req_point then true else subhelper t
+        | [] -> helper t (* Nothing on this loc, try next one *)
+    | [] -> false (* None of the locs matched *)
+  in helper locs
+let settlement_type_count_for_player stlmt_type brd active_color = List.length (settlement_points_of_type_for_player stlmt_type brd active_color)
+
+let replace_at lst n new_obj = 
+  let rec helper lst' n' acc = match lst' with
+    | h::t -> if n' = 0 then helper t (n - 1) (new_obj::acc) else helper t (n - 1) (h::acc)
+    | [] -> List.rev acc
+  in helper lst n []
+let add_settlement_at_point_for_player brd stlmt_type point active_color = (* Yields new board *)
+  let (mp, str, dk, dscrd, rbr) = brd in
+  let (intrs, rds) = str in
+  let new_inters = replace_at intrs point (active_color, stlmt_type) in
+  let new_strs = (new_inters, rds) in
+  (mp, new_strs, dk, dscrd, rbr)
+
 let has_sufficient_resources curr_inventory required_resources =
   let (cb, cw, co, cg, cl) = curr_inventory in
   let (rb, rw, ro, rg, rl) = required_resources in
@@ -376,8 +422,12 @@ let handle_move s m =
                 let new_structures = ((fst str), new_roads) in
                 let new_board = (mp, new_structures, dk, dscrd, rbr) in
                 (None, new_board, new_player_list, turn, (color, ActionRequest))
-            | BuildTown (pt) ->
-            | BuildCity (pt) -> 
+            | BuildTown (pt) -> if ((settlement_type_count_for_player Town board color) > cMAX_TOWNS_PER_PLAYER) || (is_adjacent_to_locations pt (all_settlement_locations board))
+              then (None, (board, player_list, turn, (color, ActionRequest))) (* Bail because invalid move *)
+              else (None, (add_settlement_at_point_for_player board Town pt color), player_list, turn, (color, ActionRequest)) (* Add town to board *)
+            | BuildCity (pt) -> if ((settlement_type_count_for_player City board color) > cMAX_CITIES_PER_PLAYER) || not (has_settlement_type_at_point pt board Town color)
+              then (None, (board, player_list, turn, (color, ActionRequest))) (* Bail because invalid move *)
+              else (None, (add_settlement_at_point_for_player board City pt color), player_list, turn, (color, ActionRequest)) (* Add city to board *)
             | BuildCard -> let (mp, str, dk, dscrd, rbr) = board in
               let card_deck = reveal dk in
               let index = Random.int (List.length card_deck) in
