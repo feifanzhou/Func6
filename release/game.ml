@@ -109,6 +109,8 @@ let current_roads_for_player road_list active_color =
     | (clr, ln)::t -> if clr = active_color then roads_helper t ((clr, ln)::acc) else roads_helper t acc
     | [] -> List.rev acc
   in roads_helper road_list []
+let current_roads_count_for_player road_list active_color = 
+  List.length (current_roads_for_player road_list active_color)
 let current_player_has_road_at_point road_list active_color point = 
   let my_roads = current_roads_for_player road_list active_color in
   let rec helper arr = match arr with
@@ -367,7 +369,7 @@ let handle_move s m =
             | BuildRoad (r) -> let (mp, str, dk, dscrd, rbr) = board in
               let curr_roads = snd str in
               let new_road_origin = fst (snd r) in
-              if not (current_player_has_road_at_point curr_roads color new_road_origin)
+              if (not (current_player_has_road_at_point curr_roads color new_road_origin)) || ((current_roads_count_for_player curr_roads color) > cMAX_ROADS_PER_PLAYER)
               then (None, (board, player_list, turn, (color, ActionRequest)))
               else (* Build road *)
                 let new_roads = curr_roads @ [r] in
