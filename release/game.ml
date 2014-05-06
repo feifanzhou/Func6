@@ -25,10 +25,10 @@ let rec get_player_inventory plist active_color =
   inv
 
 let rec update_player_inventory plist new_inventory active_color acc = match plist with
-  | (clr, hnd, troph)::t -> 
+  | (clr, (curr_inv, curr_cards), troph)::t -> 
     if clr = active_color (* Is discarding player, update inventory in player list *)
     then update_player_inventory t ((clr, (new_inventory, curr_cards), troph)::acc)
-    else update_player_inventory t ((clr, hnd, troph)::acc)  (* Just put same entry back in *)
+    else update_player_inventory t ((clr, (curr_inv, curr_cards), troph)::acc)  (* Just put same entry back in *)
   | [] -> List.rev acc (* Maintain player list order *)
 
 let ports_with_settlements port_list settlement_list active_color = 
@@ -86,6 +86,23 @@ let new_resources_for_settlements piece_list intersections_list active_color rob
             | Lumber -> helper t (rb, rw, ro, rg, (rl + resource_bump))
     | [] -> resources
   in helper piece_list (0, 0, 0, 0, 0)
+
+let current_cards_for_player plist active_color = match plist with (* Gives a list of cards *)
+  | (clr, (curr_inv, curr_cards), troph)::t -> match curr_cards with
+    | Hidden (i) -> []
+    | Reveal (card_list) -> card_list
+  | [] -> []
+let update_cards_for_player plist active_color (new_cards : card list) = (* Gives back an updated player list *)
+  let rec helper acc = match plist with
+    | (clr, (curr_inv, (curr_cards : cards)), troph)::t -> 
+      if clr = active_color (* Is discarding player, update inventory in player list *)
+      then helper t ((clr, (curr_inv, Reveal(new_cards)), troph)::acc)
+      else helper t ((clr, (curr_inv, curr_cards), troph)::acc)  (* Just put same entry back in *)
+    | [] -> List.rev acc (* Maintain player list order *)
+let add_cards_for_player plist active_color (additional_cards : card list) = (* Gives back an update player list *)
+  let curr_cards = current_cards_for_player plist active_color in
+  let new_cards = curr_cards @ additional_cards in
+  update_cards_for_player plist active_color new_cards
 
 let init_game () = game_of_state (gen_initial_state())
 
@@ -173,7 +190,7 @@ let handle_move s m =
         | _ -> failwith "Fill in valid moves"
     | TradeRequest ->
       | TradeResponse b -> 
-        let new_turn = {
+        let new_turn_rcrd = {
           active: turn.active;
           dicerolled: turn.dicerolled;
           cardplayed: turn.cardplayed;
@@ -182,7 +199,7 @@ let handle_move s m =
           pendingtrade: None
         } in
         if not b then <> (* Trade rejected, try another move *)
-          (None, (board, player_list, new_turn, (turn.active, ActionRequest)))
+          (None, (board, player_list, new_turn_rcrd, (turn.active, ActionRequest)))
         else (* Conduct trade *) let (clr, c1, c2) = turn.pendingtrade in
           (* Current player's resources checked in DomesticTrade action handler below *)
           let (cb1, cw1, co1, cg1, cl1) = c1 in
@@ -190,14 +207,14 @@ let handle_move s m =
           let (tcb, tcw, tco, tcg, tcl) = get_player_inventory player_list clr in 
           (* Check if target player has enough resources to satisfy trade *)
           if (tcb < cb2) || (tcw < cw2) || (tco < co2) || (tcg < cg2) || (tcl < cl2)
-          then (None, (board, player_list, new_turn, (turn.active, ActionRequest)))
+          then (None, (board, player_list, new_turn_rcrd, (turn.active, ActionRequest)))
           else (* update inventories, save, outcome *)
             let new_p2_inventory = ((tcb - cb2 + cb1), (tcw - cw2 + cw1), (tco - co2 + co1), (tcg - cg2 + cg1), (tcl - cl2 + cl1)) in
             let (ccb, ccw, cco, ccg, ccl) = get_player_inventory player_list color in
             let new_p1_inventory = ((ccb - cb1 + cb2), (ccw - cw1 + cw2), (cco - co1 + co2), (ccg - cg1 + cg2), (ccl - cl1 + cl2)) in
             let new_player_list = update_player_inventory player_list new_p2_inventory clr [] in
             let new_player_list' = update_player_inventory new_player_list new_p1_inventory color [] in
-            let new_turn_with_trade_count = {
+            let new_turn_rcrd_with_trade_count = {
               active: turn.active;
               dicerolled: turn.dicerolled;
               cardplayed: turn.cardplayed;
@@ -205,7 +222,7 @@ let handle_move s m =
               tradesmade: (turn.tradesmade + 1);
               pendingtrade: None
             }
-            (None, (board, new_player_list', new_turn_with_trade_count, (turn.active, ActionRequest)))
+            (None, (board, new_player_list', new_turn_rcrd_with_trade_count, (turn.active, ActionRequest)))
     | ActionRequest -> 
       match m' with
       | Action a ->
@@ -299,7 +316,7 @@ let handle_move s m =
             let (cb, cw, co, cg, cl) = get_player_inventory player_list color in 
             let (cb1, cw1, co1, cg1, cl1) = cost1 in
             if (cb < cb1) || (cw < cw1) || (co < co1) || (cg < cg1) || (cl < cl1) then bail_move
-            else let new_turn = {
+            else let new_turn_rcrd = {
               active: turn.active;
               dicerolled: turn.dicerolled;
               cardplayed: turn.cardplayed;
@@ -307,10 +324,11 @@ let handle_move s m =
               tradesmade: turn.tradesmade;
               pendingtrade: Some (target_color, cost1, cost2);
             } in
-            (None, (board, player_list, new_turn, (target_color, TradeRequest)))
-        | BuyBuild b -> failwith "Not yet"
+            (None, (board, player_list, new_turn_rcrd, (target_color, TradeRequest)))
+        | BuyBuild b -> match b with
+          | BuildCard -> 
         | PlayCard pc -> if turn.cardplayed then (None, (board, player_list, turn, (color, ActionRequest))) else (* Only one dev card per turn *)
-          let new_turn = {
+          let new_turn_rcrd = {
             active: turn.active;
             dicerolled: turn.dicerolled;
             cardplayed: true;
@@ -319,14 +337,14 @@ let handle_move s m =
             pendingtrade: turn.pendingtrade;
           } in
           match pc with (* TODO: Something about knights and army size? *)
-          | PlayKnight (rbrmv) -> handle_move_helper (board, player_list, new_turn, (color, RobberRequest)) (RobberMove(rbrmv))
+          | PlayKnight (rbrmv) -> handle_move_helper (board, player_list, new_turn_rcrd, (color, RobberRequest)) (RobberMove(rbrmv))
           | PlayRoadBuilding (rd, rdopt) ->
             let (mp, (intrs, rds), dk, dsc, rbr) = board in
             let roads_to_add = match rdopt with
               | None -> [rd]
               | Some (other_road) -> [rd, other_road]
             in let new_roads = List.append rds roads_to_add in
-            (None, (board, player_list, new_turn, (color, ActionRequest)))
+            (None, (board, player_list, new_turn_rcrd, (color, ActionRequest)))
           | PlayYearOfPlenty (rsrc, rsrcopt) -> 
             let (curr_clr, (curr_inv, curr_cards), curr_troph) = get_current_player player_list color in
             let update_inventory_for_type inv rsrc' = 
@@ -344,7 +362,7 @@ let handle_move s m =
               | Some (res') -> update_inventory_for_type inv' res'
             (* Put player list back together *)
             let new_player_list = update_player_inventory player_list final_inv color [] in
-            (None, (board, new_player_list, new_turn, (color, ActionRequest)))
+            (None, (board, new_player_list, new_turn_rcrd, (color, ActionRequest)))
           | PlayMonopoly (res) ->
             let rec take_resources plist acc monopoly_count = match plist with  (* New player list, count of resource *)
               | (clr, (curr_inv, curr_cards), troph)::t -> if clr = color then take_resources t acc monopoly_count else
@@ -367,19 +385,14 @@ let handle_move s m =
               | Grain -> (cb, cw, co, (cg + spoils), cl)
               | Lumber -> (cb, cw, co, cg, (cl + spoils))
             in let new_players = update_player_inventory ruined_players new_inventory color [] in (* Rebuild player list *)
-            (None, (board, new_players, new_turn, (color, ActionRequest)))
+            (None, (board, new_players, new_turn_rcrd, (color, ActionRequest)))
         | EndTurn -> 
             match turn.dicerolled with
             | Some _ -> (* Dice rolled, end turn *)
-              let new_turn = {  (* Update active player color *)
-                active: (next_turn turn.active);
-                dicerolled: turn.dicerolled;
-                cardplayed: turn.cardplayed;
-                cardsbought: turn.cardsbought;
-                tradesmade: turn.tradesmade;
-                pendingtrade: turn.pendingtrade;
-              } in
-              let new_state = (board, player_list, new_turn, ((next_turn color), ActionRequest)) in
+              let Reveal(pending_cards) = turn.cardsbought in
+              let new_turn_rcrd = new_turn (next_turn color) in
+              let new_player_list = add_cards_for_player player_list color pending_cards in
+              let new_state = (board, new_player_list, new_turn_rcrd, ((next_turn color), ActionRequest)) in
               (None, new_state)
             (* If no dice has been rolled, substitute dice roll move because dice roll is required for turn *)
             | None -> handle_move_helper (board, player_list, turn, (color, ActionRequest)) (Action(RollDice))
