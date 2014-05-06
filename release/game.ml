@@ -20,6 +20,9 @@ let rec build_settlement_at_point curr_intersections clr stlmt p index acc =
 let rec get_current_player plist active_color = match plist with
   | (clr, hnd, troph)::t -> if clr = active_color then (clr, hnd, troph) else get_current_player t
   | [] -> failwith "Couldn't find player for a color. Weird."
+let rec get_current_player_inventory plist active_color = 
+  let (clr, (inv, crds), troph) = get_current_player plist active_color in
+  inv
 
 let rec update_player_inventory plist new_inventory active_color acc = match plist with
   | (clr, hnd, troph)::t -> 
@@ -27,6 +30,18 @@ let rec update_player_inventory plist new_inventory active_color acc = match pli
     then update_player_inventory t ((clr, (new_inventory, curr_cards), troph)::acc)
     else update_player_inventory t ((clr, hnd, troph)::acc)  (* Just put same entry back in *)
   | [] -> List.rev acc (* Maintain player list order *)
+
+let ports_with_settlements port_list settlement_list active_color = 
+  let rec match_finder prtlst acc = match prtlst with
+    | ((p1, p2), rtio, prtrsrc)::t -> 
+      let itrx1 = List.nth settlement_list p1 in
+      let itrx2 = List.nth settlement_list p2 in
+      (* Check that intersection exists for either p1 or p2, and that the color matches the active color *)
+      if ((itrx1 <> None) && ((fst itrx1) = active_color)) || ((itrx2 <> None) && ((fst itrx2) = active_color)
+      then match_finder t (((p1, p2), rtio, prtrsrc)::acc)
+      else match_finder t acc
+    | [] -> List.rev acc (* Maintain order *)
+  in match_finder port_list []
 
 
 let init_game () = game_of_state (gen_initial_state())
@@ -162,7 +177,39 @@ let handle_move s m =
           else (* Didn't roll robber *)
             (* TODO: Do resources get generated as part of this move or the next one? *)
             (None, (board, player_list, rolled_turn, (color, ActionRequest)))
-        | MaritimeTrade (resource1, resource2) -> failwith "Not yet"
+        | MaritimeTrade (resource1, resource2) -> 
+          (* Get list of ports with settlements
+             If list is blank, then trade at 4:1 ratio
+             If those ports have the supported resource, trade at 2:1 ratio
+             Else trade at 3:1 ratio *)
+          let itrscs = fst (snd board) in
+          let ports = snd (fst board) in
+          let settled_ports = ports_with_settlements ports itrscs color in
+          let trade_ratio = if List.length settled_ports = 0 then 4 else
+            let rec find_resourceful_port_ratio prtlst = match prtlst with
+              | (ln, rtio, prtrsrc)::t -> match prtrsrc with
+                | PortResource(rsrc) -> if rsrc = resource1 then rtio else find_resourceful_port t
+                | Any -> find_resourceful_port t
+              | [] -> 3 (* No resourceful port found *)
+            in find_resourceful_port_ratio settled_ports in
+          let (cb, cw, co, cg, cl) = get_current_player_inventory player_list color in
+          let reduced_inventory = match resource1 with (* Remove r1 from inventory if possible *)
+            | Brick -> if cb < trade_ratio then None else Some ((cb - trade_ratio), cw, co, cg, cl)
+            | Wool -> if cw < trade_ratio then None else Some (cb, (cw - trade_ratio), co, cg, cl)
+            | Ore -> if co < trade_ratio then None else Some (cb, cw, (co - trade_ratio), cg, cl)
+            | Grain -> if cg < trade_ratio then None else Some (cb, cw, co, (cg - trade_ratio), cl)
+            | Lumber -> if cl < trade_ratio then None else Some (cb, cw, co, cg, (cl - trade_ratio))
+          in match reduced_inventory with (* Perform trade, or exit if not enough r1 *)
+            | None -> (None, (board, player_list, turn, (color, ActionRequest)))
+            | Some (rb, rw, ro, rg, rl) -> let new_inventory = match resource2 with
+                | Brick -> ((rb + 1), rw, ro, rg, rl)
+                | Wool -> (rb, (rw + 1), ro, rg, rl)
+                | Ore -> (rb, rw, (ro + 1), rg, rl)
+                | Grain -> (rb, rw, ro, (rg + 1), rl)
+                | Lumber -> (rb, rw, ro, rg, (rl + 1))
+              in let new_player_list = update_player_inventory player_list new_inventory color [] in
+              (None, (board, new_player_list, turn, (color, ActionRequest)))
+
         | DomesticTrade (color, cost1, cost2) -> failwith "Not yet"
         | BuyBuild b -> failwith "Not yet"
         | PlayCard pc -> match pc with (* TODO: Something about knights and army size? *)
@@ -230,7 +277,8 @@ let handle_move s m =
               (None, new_state)
             (* If no dice has been rolled, substitute dice roll move because dice roll is required for turn *)
             | None -> handle_move_helper (board, player_list, turn, (color, ActionRequest)) (Action(RollDice))
-      | _ -> handle_move (board, player_list, turn, (color, ActionRequest)) (Action(EndTurn)) (* Action end turn *)
+      | _ -> let next_action = (if turn.dicerolled = None then Action(RollDice) else Action(EndTurn)) in
+             handle_move (board, player_list, turn, (color, ActionRequest)) (next_action)
   in handle_move_helper s m
 
 let presentation s = failwith "Were not too much to pay for birth."
