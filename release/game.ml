@@ -96,13 +96,28 @@ let update_cards_for_player plist active_color (new_cards : card list) = (* Give
   let rec helper acc = match plist with
     | (clr, (curr_inv, (curr_cards : cards)), troph)::t -> 
       if clr = active_color (* Is discarding player, update inventory in player list *)
-      then helper t ((clr, (curr_inv, Reveal(new_cards)), troph)::acc)
+      then helper t ((clr, (curr_inv, (wrap_reveal new_cards)), troph)::acc)
       else helper t ((clr, (curr_inv, curr_cards), troph)::acc)  (* Just put same entry back in *)
     | [] -> List.rev acc (* Maintain player list order *)
 let add_cards_for_player plist active_color (additional_cards : card list) = (* Gives back an update player list *)
   let curr_cards = current_cards_for_player plist active_color in
   let new_cards = curr_cards @ additional_cards in
   update_cards_for_player plist active_color new_cards
+
+let has_sufficient_resources curr_inventory required_resources =
+  let (cb, cw, co, cg, cl) = curr_inventory in
+  let (rb, rw, ro, rg, rl) = required_resources in
+  ((cb - rb) > 0) && ((cw - rw) > 0) && ((co - ro) > 0) && ((cg - rg) > 0) && ((cl - rl) > 0)
+
+let diff_resources curr_inventory expenditure = 
+  let (cb, cw, co, cg, cl) = curr_inventory in
+  let (rb, rw, ro, rg, rl) = expenditure in
+  ((cb - rb), (cw - rw), (co - ro), (cg - rg), (cl - rl))
+
+(* Remove item at index from list, thanks http://ocaml.org/learn/tutorials/99problems.html *)
+let rec remove_at n = function
+  | [] -> []
+  | h :: t -> if n = 0 then t else h :: remove_at (n-1) t
 
 let init_game () = game_of_state (gen_initial_state())
 
@@ -325,8 +340,36 @@ let handle_move s m =
               pendingtrade: Some (target_color, cost1, cost2);
             } in
             (None, (board, player_list, new_turn_rcrd, (target_color, TradeRequest)))
-        | BuyBuild b -> match b with
-          | BuildCard -> 
+        | BuyBuild b -> let resources_needed = cost_of_build b in
+          let curr_inventory = get_player_inventory player_list color in
+          if not (has_sufficient_resources curr_inventory resources_needed)
+          then 
+            if turn.dicerolled = None 
+            then handle_move (board, player_list, turn, (color, ActionRequest)) (Action(RollDice))
+            else handle_move (board, player_list, turn, (color, ActionRequest)) (Action(EndTurn))
+          else (* Has resources to buy build *)
+            let new_resources = diff_resources curr_inventory resources_needed in
+            (* Update resources *)
+            let new_player_list = update_player_inventory player_list new_resources color [] in
+            match b with
+            | BuildRoad (r) -> 
+            | BuildTown (pt) ->
+            | BuildCity (pt) ->
+            | BuildCard -> let (mp, str, dk, dscrd, rbr) = board in
+              let card_deck = reveal dk in
+              let index = Random.int (List.length card_deck) in
+              let chosen_card = List.nth card_deck index in
+              let remaining_deck = remove_at index card_deck in
+              let new_cards_bought = append_card turn.cardsbought chosen_card in
+              let new_turn = {
+                active: turn.active;
+                dicerolled: turn.dicerolled;
+                cardplayed: turn.cardplayed;
+                cardsbought: new_cards_bought;
+                tradesmade: turn.tradesmade;
+                pendingtrade: turn.pendingtrade;
+              } in
+              (None, ((mp, str, remaining_deck, dscrd, rbr), new_player_list, new_turn, (color, ActionRequest))
         | PlayCard pc -> if turn.cardplayed then (None, (board, player_list, turn, (color, ActionRequest))) else (* Only one dev card per turn *)
           let new_turn_rcrd = {
             active: turn.active;
@@ -336,6 +379,8 @@ let handle_move s m =
             tradesmade: turn.tradesmade;
             pendingtrade: turn.pendingtrade;
           } in
+          (* TODO: Decrement player's hand *)
+          (* TODO: Add cards to discarded pile *)
           match pc with (* TODO: Something about knights and army size? *)
           | PlayKnight (rbrmv) -> handle_move_helper (board, player_list, new_turn_rcrd, (color, RobberRequest)) (RobberMove(rbrmv))
           | PlayRoadBuilding (rd, rdopt) ->
@@ -389,7 +434,7 @@ let handle_move s m =
         | EndTurn -> 
             match turn.dicerolled with
             | Some _ -> (* Dice rolled, end turn *)
-              let Reveal(pending_cards) = turn.cardsbought in
+              let pending_cards = reveal turn.cardsbought in
               let new_turn_rcrd = new_turn (next_turn color) in
               let new_player_list = add_cards_for_player player_list color pending_cards in
               let new_state = (board, new_player_list, new_turn_rcrd, ((next_turn color), ActionRequest)) in
