@@ -209,7 +209,7 @@ let handle_move s m =
     | ActionRequest -> 
       match m' with
       | Action a ->
-        match a with
+        match a with (* TODO: Sub rolldice move if turn.dicerolled = None *)
         | RollDice -> let roll_num = Util.random_roll () in
           let rolled_turn = {
             active: turn.active;
@@ -309,15 +309,24 @@ let handle_move s m =
             } in
             (None, (board, player_list, new_turn, (target_color, TradeRequest)))
         | BuyBuild b -> failwith "Not yet"
-        | PlayCard pc -> match pc with (* TODO: Something about knights and army size? *)
-          | PlayKnight (rbrmv) -> handle_move_helper (board, player_list, turn, (color, RobberRequest)) (RobberMove(rbrmv))
+        | PlayCard pc -> if turn.cardplayed then (None, (board, player_list, turn, (color, ActionRequest))) else (* Only one dev card per turn *)
+          let new_turn = {
+            active: turn.active;
+            dicerolled: turn.dicerolled;
+            cardplayed: true;
+            cardsbought: turn.cardsbought;
+            tradesmade: turn.tradesmade;
+            pendingtrade: turn.pendingtrade;
+          } in
+          match pc with (* TODO: Something about knights and army size? *)
+          | PlayKnight (rbrmv) -> handle_move_helper (board, player_list, new_turn, (color, RobberRequest)) (RobberMove(rbrmv))
           | PlayRoadBuilding (rd, rdopt) ->
             let (mp, (intrs, rds), dk, dsc, rbr) = board in
             let roads_to_add = match rdopt with
               | None -> [rd]
               | Some (other_road) -> [rd, other_road]
             in let new_roads = List.append rds roads_to_add in
-            (None, (board, player_list, turn, (color, ActionRequest)))
+            (None, (board, player_list, new_turn, (color, ActionRequest)))
           | PlayYearOfPlenty (rsrc, rsrcopt) -> 
             let (curr_clr, (curr_inv, curr_cards), curr_troph) = get_current_player player_list color in
             let update_inventory_for_type inv rsrc' = 
@@ -335,7 +344,7 @@ let handle_move s m =
               | Some (res') -> update_inventory_for_type inv' res'
             (* Put player list back together *)
             let new_player_list = update_player_inventory player_list final_inv color [] in
-            (None, (board, new_player_list, turn, (color, ActionRequest)))
+            (None, (board, new_player_list, new_turn, (color, ActionRequest)))
           | PlayMonopoly (res) ->
             let rec take_resources plist acc monopoly_count = match plist with  (* New player list, count of resource *)
               | (clr, (curr_inv, curr_cards), troph)::t -> if clr = color then take_resources t acc monopoly_count else
@@ -358,7 +367,7 @@ let handle_move s m =
               | Grain -> (cb, cw, co, (cg + spoils), cl)
               | Lumber -> (cb, cw, co, cg, (cl + spoils))
             in let new_players = update_player_inventory ruined_players new_inventory color [] in (* Rebuild player list *)
-            (None, (board, new_players, turn, (color, ActionRequest)))
+            (None, (board, new_players, new_turn, (color, ActionRequest)))
         | EndTurn -> 
             match turn.dicerolled with
             | Some _ -> (* Dice rolled, end turn *)
