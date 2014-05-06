@@ -17,6 +17,17 @@ let rec build_settlement_at_point curr_intersections clr stlmt p index acc =
     else (build_settlement_at_point t clr stlmt p (index + 1) (None :: acc))
   | [] -> List.rev acc
 
+let rec get_current_player plist active_color = match plist with
+  | (clr, hnd, troph)::t -> if clr = active_color then (clr, hnd, troph) else get_current_player t
+  | [] -> failwith "Couldn't find player for a color. Weird."
+
+let rec update_player_inventory plist new_inventory active_color acc = match plist with
+  | (clr, hnd, troph)::t -> 
+    if clr = active_color (* Is discarding player, update inventory in player list *)
+    then update_player_inventory t ((clr, (new_inventory, curr_cards), troph)::acc)
+    else update_player_inventory t ((clr, hnd, troph)::acc)  (* Just put same entry back in *)
+  | [] -> List.rev acc (* Maintain player list order *)
+
 
 let init_game () = game_of_state (gen_initial_state())
 
@@ -93,20 +104,11 @@ let handle_move s m =
       else (* Current player needs to discard *)
         match m' with
         | DiscardMove (cost_b, cost_w, cost_o, cost_g, cost_l) ->
-          let rec get_current_player plist = match plist with
-            | (clr, hnd, troph)::t -> if clr = color then (clr, hnd, troph) else get_current_player t
-            | [] -> failwith "Couldn't find player for a color. Weird."
-          in (curr_clr, (curr_inv, curr_cards), curr_troph) = get_current_player player_list in
+          let (curr_clr, (curr_inv, curr_cards), curr_troph) = get_current_player player_list color in
           let (curr_b, curr_w, curr_o, curr_g, curr_l) = curr_inv in
           (* TODO: Error checking — differences shouldn't be negative for example *)
           let new_inventory = (curr_b - cost_b, curr_w - cost_w, curr_o - cost_o, curr_g - cost_g, curr_l - cost_l) in
-          let rec generate_new_player_list plist acc = match plist with
-            | (clr, hnd, troph)::t -> 
-              if clr = color (* Is discarding player, update inventory in player list *)
-              then generate_new_player_list t ((clr, (new_inventory, curr_cards), troph)::acc)
-              else generate_new_player_list t ((clr, hnd, troph)::acc)  (* Just put same entry back in *)
-            | [] -> List.rev acc (* Maintain player list order *)
-          in new_player_list = generate_new_player_list player_list [] in
+          let new_player_list = update_player_inventory player_list new_inventory color [] in
           if color <> White (* Not last player in order, get next one to try discarding resources *)
           then (None, (board, new_player_list, turn, ((next_turn color), DiscardRequest)))
           else (None, (board, new_player_list, turn, (turn.active, RobberRequest))) (* Pass control back to active player with RobberRequest *)
@@ -163,7 +165,58 @@ let handle_move s m =
         | MaritimeTrade (resource1, resource2) -> failwith "Not yet"
         | DomesticTrade (color, cost1, cost2) -> failwith "Not yet"
         | BuyBuild b -> failwith "Not yet"
-        | PlayCard pc -> failwith "Not yet"
+        | PlayCard pc -> match pc with
+            (* TODO: Something about knights and army size? *)
+          | PlayKnight (rbrmv) -> handle_move_helper (board, player_list, turn, (color, RobberRequest)) (RobberMove(rbrmv))
+          | PlayRoadBuilding (rd, rdopt) ->
+            let (mp, (intrs, rds), dk, dsc, rbr) = board in
+            let roads_to_add = match rdopt with
+              | None -> [rd]
+              | Some (other_road) -> [rd, other_road]
+            in let new_roads = List.append rds roads_to_add in
+            (None, (board, player_list, turn, (color, ActionRequest)))
+          | PlayYearOfPlenty (rsrc, rsrcopt) -> 
+            let (curr_clr, (curr_inv, curr_cards), curr_troph) = get_current_player player_list color in
+            let update_inventory_for_type inv rsrc' = 
+              let (curr_b, curr_w, curr_o, curr_g, curr_l) = inv in
+              match rsrc' with
+              | Brick -> (curr_b + 1, curr_w, curr_o, curr_g, curr_l)
+              | Wool -> (curr_b, curr_w + 1, curr_o, curr_g, curr_l)
+              | Ore -> (curr_b, curr_w, curr_o + 1, curr_g, curr_l)
+              | Grain -> (curr_b, curr_w, curr_o, curr_g + 1, curr_l)
+              | Lumber -> (curr_b, curr_w, curr_o, curr_g, curr_l + 1)
+            in let inv' = update_inventory_for_type curr_inv rsrc in
+            (* Update inventory for second type if one exists *)
+            let final_inv = match rsrcopt with
+              | None -> inv'
+              | Some (res') -> update_inventory_for_type inv' res'
+            (* Put player list back together *)
+            let new_player_list = update_player_inventory player_list final_inv color [] in
+            (None, (board, new_player_list, turn, (color, ActionRequest)))
+          | PlayMonopoly (res) ->
+            let rec take_resources plist acc monopoly_count = match plist with  (* New player list, count of resource *)
+              | (clr, (curr_inv, curr_cards), troph)::t -> if clr = color then take_resources t acc monopoly_count else
+                let (cb, cw, co, cg, cl) = curr_inv in
+                let (new_inventory, curr_res_count) = match res with
+                  | Brick -> ((0, cw, co, cg, cl), cb)
+                  | Wool -> ((cb, 0, co, cg, cl), cw)
+                  | Ore -> ((cb, cw, 0, cg, cl), co)
+                  | Grain -> ((cb, cw, co, 0, cl), cg)
+                  | Lumber -> ((cb, cw, co, cg, 0), cl)
+                in let new_player = (clr, (new_inventory, curr_cards), troph) in
+                take_resources t (new_player::acc) (monopoly_count + curr_res_count)
+              | [] -> ((List.rev acc), monopoly_count)
+            in let (ruined_players, spoils) = take_resources player_list [] 0 in
+            let (clr, ((cb, cw, co, cg, cl), curr_cards), troph) = get_current_player player_list color in
+            let new_inventory = match res with (* Add taken resources to current inventory *)
+              | Brick -> ((cb + spoils), cw, co, cg, cl)
+              | Wool -> (cb, (cw + spoils), co, cg, cl)
+              | Ore -> (cb, cw, (co + spoils), cg, cl)
+              | Grain -> (cb, cw, co, (cg + spoils), cl)
+              | Lumber -> (cb, cw, co, cg, (cl + spoils))
+            in let new_players = update_player_inventory ruined_players new_inventory color [] in (* Rebuild player list *)
+            (None, (board, new_players, turn, (color, ActionRequest)))
+
         | EndTurn -> 
             match turn.dicerolled with
             | Some _ -> (* Dice rolled, end turn *)
@@ -178,8 +231,8 @@ let handle_move s m =
               let new_state = (board, player_list, new_turn, ((next_turn color), ActionRequest)) in
               (None, new_state)
             (* If no dice has been rolled, substitute dice roll move because dice roll is required for turn *)
-            | None -> handle_move_helper (board, player_list, turn, (color, ActionRequest)) (Action RollDice)
-      | _ -> handle_move (board, player_list, turn, (color, ActionRequest)) (Action EndTurn) (* Action end turn *)
+            | None -> handle_move_helper (board, player_list, turn, (color, ActionRequest)) (Action(RollDice))
+      | _ -> handle_move (board, player_list, turn, (color, ActionRequest)) (Action(EndTurn)) (* Action end turn *)
   in handle_move_helper s m
 
 let presentation s = failwith "Were not too much to pay for birth."
