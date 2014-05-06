@@ -104,6 +104,18 @@ let add_cards_for_player plist active_color (additional_cards : card list) = (* 
   let new_cards = curr_cards @ additional_cards in
   update_cards_for_player plist active_color new_cards
 
+let current_roads_for_player road_list active_color =
+  let rec roads_helper rdlst acc = match rdlst with
+    | (clr, ln)::t -> if clr = active_color then roads_helper t ((clr, ln)::acc) else roads_helper t acc
+    | [] -> List.rev acc
+  in roads_helper road_list []
+let current_player_has_road_at_point road_list active_color point = 
+  let my_roads = current_roads_for_player road_list active_color in
+  let rec helper arr = match arr with
+    | (clr, (p1, p2))::t -> if (p1 = point) || (p2 = point) then true else helper t
+    | [] -> false
+  in helper my_roads
+
 let has_sufficient_resources curr_inventory required_resources =
   let (cb, cw, co, cg, cl) = curr_inventory in
   let (rb, rw, ro, rg, rl) = required_resources in
@@ -352,9 +364,18 @@ let handle_move s m =
             (* Update resources *)
             let new_player_list = update_player_inventory player_list new_resources color [] in
             match b with
-            | BuildRoad (r) -> 
+            | BuildRoad (r) -> let (mp, str, dk, dscrd, rbr) = board in
+              let curr_roads = snd str in
+              let new_road_origin = fst (snd r) in
+              if not (current_player_has_road_at_point curr_roads color new_road_origin)
+              then (None, (board, player_list, turn, (color, ActionRequest)))
+              else (* Build road *)
+                let new_roads = curr_roads @ [r] in
+                let new_structures = ((fst str), new_roads) in
+                let new_board = (mp, new_structures, dk, dscrd, rbr) in
+                (None, new_board, new_player_list, turn, (color, ActionRequest))
             | BuildTown (pt) ->
-            | BuildCity (pt) ->
+            | BuildCity (pt) -> 
             | BuildCard -> let (mp, str, dk, dscrd, rbr) = board in
               let card_deck = reveal dk in
               let index = Random.int (List.length card_deck) in
