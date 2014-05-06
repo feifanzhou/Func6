@@ -165,8 +165,7 @@ let handle_move s m =
         | MaritimeTrade (resource1, resource2) -> failwith "Not yet"
         | DomesticTrade (color, cost1, cost2) -> failwith "Not yet"
         | BuyBuild b -> failwith "Not yet"
-        | PlayCard pc -> match pc with
-            (* TODO: Something about knights and army size? *)
+        | PlayCard pc -> match pc with (* TODO: Something about knights and army size? *)
           | PlayKnight (rbrmv) -> handle_move_helper (board, player_list, turn, (color, RobberRequest)) (RobberMove(rbrmv))
           | PlayRoadBuilding (rd, rdopt) ->
             let (mp, (intrs, rds), dk, dsc, rbr) = board in
@@ -216,7 +215,6 @@ let handle_move s m =
               | Lumber -> (cb, cw, co, cg, (cl + spoils))
             in let new_players = update_player_inventory ruined_players new_inventory color [] in (* Rebuild player list *)
             (None, (board, new_players, turn, (color, ActionRequest)))
-
         | EndTurn -> 
             match turn.dicerolled with
             | Some _ -> (* Dice rolled, end turn *)
