@@ -43,6 +43,49 @@ let ports_with_settlements port_list settlement_list active_color =
     | [] -> List.rev acc (* Maintain order *)
   in match_finder port_list []
 
+let pieces_for_roll roll = match roll with
+  | 2 -> [17]
+  | 3 -> [8, 15]
+  | 4 -> [3, 10]
+  | 5 -> [5, 16]
+  | 6 -> [4, 18]
+  | 8 -> [11, 12]
+  | 9 -> [2, 14]
+  | 10 -> [6, 13]
+  | 11 -> [0, 9]
+  | 12 -> [1]
+  | _ -> []
+
+let new_resources_for_settlements piece_list intersections_list active_color robber_pos = (* Need count of towns and cities for active player *)
+  let rec helper pc_list (resources : cost) = match pc_list with (* For every piece, get its corners *)
+    | h::t -> let piece_pos = snd h in
+      if robber_pos = piece_pos then helper t total_town_count total_city_count else (* Skip robber piece *)
+      let corners = piece_corners piece_pos in
+      let rec corner_helper corner_list town_count city_count = match corner_list with
+        | h'::t' -> let itrsc = List.nth intersections_list h' in (* Get settlement at every corner *)
+          match itrsc with
+          | None -> corner_helper t' town_count city_count (* If no settlement, check next corner *)
+          | Some (clr, stlmt) -> (* If there is a settlement *)
+            if clr = active_color (* Check its color *)
+            then match stlmt with
+              | City -> corner_helper t' town_count (city_count + 1)
+              | Town -> corner_helper t' (town_count + 1) city_count
+            else corner_helper t' town_count city_count (* Not active player's settlement *)
+        | [] -> (* Move to next piece *)
+          (* Calculate resource type and amount to add *)
+          let resource_bump = town_count * (settlement_num_resources Town) + city_count * (settlement_num_resources Count) in
+          let rsrc = resource_of_terrain (fst h) in
+          match rsrc with
+          | None -> helper t resources (* Pieie has no resources *)
+          | Some (r) -> let (rb, rw, ro, rg, rl) = resources in (* Add resources *)
+            match r with
+            | Brick -> helper t ((rb + resource_bump), rw, ro, rg, rl)
+            | Wool -> helper t (rb, (rw + resource_bump), ro, rg, rl)
+            | Ore -> helper t (rb, rw, (ro + resource_bump), rg, rl)
+            | Grain -> helper t (rb, rw, ro, (rg + resource_bump), rl)
+            | Lumber -> helper t (rb, rw, ro, rg, (rl + resource_bump))
+    | [] -> resources
+  in helper piece_list (0, 0, 0, 0, 0)
 
 let init_game () = game_of_state (gen_initial_state())
 
@@ -206,9 +249,17 @@ let handle_move s m =
                 | [] -> None
               in let adj_color = adjacent_settlement_color hex_corners in
               (None, (board, player_list, rolled_turn, (color, RobberRequest)))
-          else (* Didn't roll robber *)
-            (* TODO: Do resources get generated as part of this move or the next one? *)
-            (None, (board, player_list, rolled_turn, (color, ActionRequest)))
+          else (* Didn't roll robber, generate resources *)
+            let activated_pieces = pieces_for_roll roll_num in
+            let (mp, str, dk, dscrd, rbr) = board in
+            let itrsc_list = fst (snd board) in
+            let rec players_helper plist acc = match plist with (* Build new player list with resources *)
+              | (clr, (inv, crds), troph)::t -> let new_inv = new_resources_for_settlements activated_pieces itrsc_list clr rbr in
+                let new_player = (clr, (new_inv, crds), troph) in
+                players_helper t (new_player::acc)
+              | [] -> List.rev acc
+            in let new_player_list = players_helper player_list [] in
+            (None, (board, new_player_list, rolled_turn, (color, ActionRequest)))
         | MaritimeTrade (resource1, resource2) -> 
           (* Get list of ports with settlements
              If list is blank, then trade at 4:1 ratio
@@ -241,7 +292,6 @@ let handle_move s m =
                 | Lumber -> (rb, rw, ro, rg, (rl + 1))
               in let new_player_list = update_player_inventory player_list new_inventory color [] in
               (None, (board, new_player_list, turn, (color, ActionRequest)))
-
         | DomesticTrade (target_color, cost1, cost2) -> (* Need to check if max trades exceeded or if player has enough inventory *)
           let bail_move = (None, (board, player_list, turn, (color, ActionRequest))) in
           if turn.tradesmade > cNUM_TRADES_PER_TURN then bail_move
