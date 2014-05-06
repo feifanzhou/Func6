@@ -20,7 +20,7 @@ let rec build_settlement_at_point curr_intersections clr stlmt p index acc =
 let rec get_current_player plist active_color = match plist with
   | (clr, hnd, troph)::t -> if clr = active_color then (clr, hnd, troph) else get_current_player t
   | [] -> failwith "Couldn't find player for a color. Weird."
-let rec get_current_player_inventory plist active_color = 
+let rec get_player_inventory plist active_color = 
   let (clr, (inv, crds), troph) = get_current_player plist active_color in
   inv
 
@@ -129,8 +129,32 @@ let handle_move s m =
           else (None, (board, new_player_list, turn, (turn.active, RobberRequest))) (* Pass control back to active player with RobberRequest *)
         | _ -> failwith "Fill in valid moves"
     | TradeRequest ->
-      | TradeResponse b ->
-      | _ -> failwith "Fill in valid moves"
+      | TradeResponse b -> 
+        let new_turn = {
+          active: turn.active;
+          dicerolled: turn.dicerolled;
+          cardplayed: turn.cardplayed;
+          cardsbought: turn.cardsbought;
+          tradesmade: turn.tradesmade;
+          pendingtrade: None
+        } in
+        if not b then <> (* Trade rejected, try another move *)
+          (None, (board, player_list, new_turn, (color, ActionRequest)))
+        else (* Conduct trade *) let (clr, c1, c2) = turn.pendingtrade in
+          (* Current player's resources checked in DomesticTrade action handler below *)
+          let (cb1, cw1, co1, cg1, cl1) = c1 in
+          let (cb2, cw2, co2, cg2, cl2) = c2 in
+          let (tcb, tcw, tco, tcg, tcl) = get_player_inventory player_list clr in 
+          (* Check if target player has enough resources to satisfy trade *)
+          if (tcb < cb2) || (tcw < cw2) || (tco < co2) || (tcg < cg2) || (tcl < cl2)
+          then (None, (board, player_list, new_turn, (color, ActionRequest)))
+          else (* update inventories, save, outcome *)
+            let new_p2_inventory = ((tcb - cb2 + cb1), (tcw - cw2 + cw1), (tco - co2 + co1), (tcg - cg2 + cg1), (tcl - cl2 + cl1)) in
+            let (ccb, ccw, cco, ccg, ccl) = get_player_inventory player_list color in
+            let new_p1_inventory = ((ccb - cb1 + cb2), (ccw - cw1 + cw2), (cco - co1 + co2), (ccg - cg1 + cg2), (ccl - cl1 + cl2)) in
+            let new_player_list = update_player_inventory player_list new_p2_inventory clr [] in
+            let new_player_list' = update_player_inventory new_player_list new_p1_inventory color [] in
+            (None, (board, new_player_list', new_turn, (color, ActionRequest)))
     | ActionRequest -> 
       match m' with
       | Action a ->
@@ -192,7 +216,7 @@ let handle_move s m =
                 | Any -> find_resourceful_port t
               | [] -> 3 (* No resourceful port found *)
             in find_resourceful_port_ratio settled_ports in
-          let (cb, cw, co, cg, cl) = get_current_player_inventory player_list color in
+          let (cb, cw, co, cg, cl) = get_player_inventory player_list color in
           let reduced_inventory = match resource1 with (* Remove r1 from inventory if possible *)
             | Brick -> if cb < trade_ratio then None else Some ((cb - trade_ratio), cw, co, cg, cl)
             | Wool -> if cw < trade_ratio then None else Some (cb, (cw - trade_ratio), co, cg, cl)
