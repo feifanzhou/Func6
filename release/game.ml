@@ -299,14 +299,14 @@ let handle_move s m =
     | TradeRequest -> match m' with
       | TradeResponse b -> 
         let new_turn_rcrd = {
-          active: turn.active;
-          dicerolled: turn.dicerolled;
-          cardplayed: turn.cardplayed;
-          cardsbought: turn.cardsbought;
-          tradesmade: turn.tradesmade;
-          pendingtrade: None
+          active = turn.active;
+          dicerolled = turn.dicerolled;
+          cardplayed = turn.cardplayed;
+          cardsbought = turn.cardsbought;
+          tradesmade = turn.tradesmade;
+          pendingtrade = None
         } in
-        if not b then <> (* Trade rejected, try another move *)
+        if not b then (* Trade rejected, try another move *)
           finish_move (board, player_list, new_turn_rcrd, (turn.active, curr_req))
         else (* Conduct trade *) let (clr, c1, c2) = turn.pendingtrade in
           (* Current player's resources checked in DomesticTrade action handler below *)
@@ -323,13 +323,13 @@ let handle_move s m =
             let new_player_list = update_player_inventory player_list new_p2_inventory clr [] in
             let new_player_list' = update_player_inventory new_player_list new_p1_inventory color [] in
             let new_turn_rcrd_with_trade_count = {
-              active: turn.active;
-              dicerolled: turn.dicerolled;
-              cardplayed: turn.cardplayed;
-              cardsbought: turn.cardsbought;
-              tradesmade: (turn.tradesmade + 1);
-              pendingtrade: None
-            }
+              active = turn.active;
+              dicerolled = turn.dicerolled;
+              cardplayed = turn.cardplayed;
+              cardsbought = turn.cardsbought;
+              tradesmade = (turn.tradesmade + 1);
+              pendingtrade = None
+            } in
             finish_move (board, new_player_list', new_turn_rcrd_with_trade_count, (turn.active, curr_req))
       | _ -> failwith "TODO: Minimum viable move"
     | ActionRequest -> 
@@ -338,12 +338,12 @@ let handle_move s m =
         match a with (* TODO: Sub rolldice move if turn.dicerolled = None *)
         | RollDice -> let roll_num = Util.random_roll () in
           let rolled_turn = {
-            active: turn.active;
-            dicerolled: Some roll_num;
-            cardplayed: turn.cardplayed;
-            cardsbought: turn.cardsbought;
-            tradesmade: turn.tradesmade;
-            pendingtrade: turn.pendingtrade;
+            active = turn.active;
+            dicerolled = Some roll_num;
+            cardplayed = turn.cardplayed;
+            cardsbought = turn.cardsbought;
+            tradesmade = turn.tradesmade;
+            pendingtrade = turn.pendingtrade;
           } in
           if roll_num = cROLL_ROBBER then
             let new_robber_loc = Random.int cMAX_PIECE_NUM in
@@ -426,12 +426,12 @@ let handle_move s m =
             let (cb1, cw1, co1, cg1, cl1) = cost1 in
             if (cb < cb1) || (cw < cw1) || (co < co1) || (cg < cg1) || (cl < cl1) then bail_move
             else let new_turn_rcrd = {
-              active: turn.active;
-              dicerolled: turn.dicerolled;
-              cardplayed: turn.cardplayed;
-              cardsbought: turn.cardsbought;
-              tradesmade: turn.tradesmade;
-              pendingtrade: Some (target_color, cost1, cost2);
+              active = turn.active;
+              dicerolled = turn.dicerolled;
+              cardplayed = turn.cardplayed;
+              cardsbought = turn.cardsbought;
+              tradesmade = turn.tradesmade;
+              pendingtrade = Some (target_color, cost1, cost2);
             } in
             (None, (board, player_list, new_turn_rcrd, (target_color, TradeRequest)))
         | BuyBuild b -> let resources_needed = cost_of_build b in
@@ -482,23 +482,23 @@ let handle_move s m =
               let chosen_card = List.nth card_deck index in
               let remaining_deck = remove_at index card_deck in
               let new_cards_bought = append_card turn.cardsbought chosen_card in
-              let new_turn = {
-                active: turn.active;
-                dicerolled: turn.dicerolled;
-                cardplayed: turn.cardplayed;
-                cardsbought: new_cards_bought;
-                tradesmade: turn.tradesmade;
-                pendingtrade: turn.pendingtrade;
+              let new_turn_rcrd = {
+                active = turn.active;
+                dicerolled = turn.dicerolled;
+                cardplayed = turn.cardplayed;
+                cardsbought = new_cards_bought;
+                tradesmade = turn.tradesmade;
+                pendingtrade = turn.pendingtrade;
               } in
-              finish_move ((mp, str, remaining_deck, dscrd, rbr), new_player_list, new_turn, (color, curr_req))
+              finish_move ((mp, str, remaining_deck, dscrd, rbr), new_player_list, new_turn_rcrd, (color, curr_req))
         | PlayCard pc -> if turn.cardplayed then finish_move (board, player_list, turn, (color, curr_req)) else (* Only one dev card per turn *)
           let new_turn_rcrd = {
-            active: turn.active;
-            dicerolled: turn.dicerolled;
-            cardplayed: true;
-            cardsbought: turn.cardsbought;
-            tradesmade: turn.tradesmade;
-            pendingtrade: turn.pendingtrade;
+            active = turn.active;
+            dicerolled = turn.dicerolled;
+            cardplayed = true;
+            cardsbought = turn.cardsbought;
+            tradesmade = turn.tradesmade;
+            pendingtrade = turn.pendingtrade;
           } in
           (* TODO: Decrement player's hand *)
           (* TODO: Add cards to discarded pile *)
@@ -539,7 +539,7 @@ let handle_move s m =
               | None -> inv'
               | Some (res') -> update_inventory_for_type inv' res'
             (* Put player list back together *)
-            let new_player_list = update_player_inventory player_list final_inv color [] in
+            in let new_player_list = update_player_inventory player_list final_inv color [] in
             finish_move (board, new_player_list, new_turn_rcrd, (color, curr_req))
           | PlayMonopoly (res) ->
             let rec take_resources plist acc monopoly_count = match plist with  (* New player list, count of resource *)
