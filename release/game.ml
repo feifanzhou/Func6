@@ -197,7 +197,6 @@ let victory_points_for_player board plist active_color =
   let victory_card_count = victory_card_count_for_player plist active_color in
   let longest_road_count = if r then 1 else 0 in
   let largest_army_count = if a then 1 else 0 in
-  (* TODO: Handle trophies *)
   total_points = cVP_TOWN * town_count + cVP_CITY * city_count + cVP_CARD * victory_card_count + cVP_LONGEST_ROAD * longest_road_count + cVP_LARGEST_ARMY * largest_army_count
 
 let finish_move (board, player_list, turn, (color, curr_req)) = 
@@ -575,4 +574,16 @@ let handle_move s m =
              handle_move (board, player_list, turn, (color, ActionRequest)) (next_action)
   in handle_move_helper s m
 
-let presentation s = failwith "Were not too much to pay for birth."
+let presentation s = let (board, player_list, turn, (color, curr_req)) = s in
+  let next_player = next_turn color in
+  let rec player_helper plist acc = match plist with
+    | (clr, (inv, crds), trph)::t -> let card_list = reveal crds in
+      (* Hide cards if necessary *)
+      let new_cards = if clr = next_player then crds else Hidden (List.length card_list) in
+      (* Put player back together *)
+      let new_player = (clr, (inv, new_cards), trph) in
+      (* Put player list back together *)
+      player_helper t (new_player::acc)
+    | [] -> List.rev acc (* Maintain order *)
+  in let new_player_list = player_helper player_list [] in
+  (board, new_player_list, turn, (color, curr_req))
