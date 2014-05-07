@@ -174,6 +174,28 @@ let diff_resources curr_inventory expenditure =
   let (rb, rw, ro, rg, rl) = expenditure in
   ((cb - rb), (cw - rw), (co - ro), (cg - rg), (cl - rl))
 
+let victory_card_count_for_player plist active_color = let curr_player = get_current_player plist active_color in
+  let (clr, (curr_inv, curr_crds), troph) = curr_player in
+  let card_list = reveal curr_crds in
+  let rec card_list_helper clist count = match clist with
+    | h::t -> match h with
+      | VictoryPoint -> card_list_helper t (count + 1)
+      | _ -> card_list_helper t count
+    | [] -> count
+  in card_list_helper card_list 0
+let victory_points_for_player board plist active_color = 
+  (* Victory points come from towns, cities, victory cards, and trophies *)
+  let town_count = settlement_type_count_for_player Town board active_color in
+  let city_count = settlement_type_count_for_player City board active_color in
+  let victory_card_count = victory_card_count_for_player plist active_color in
+  (* TODO: Handle trophies *)
+  total_points = cVP_TOWN * town_count + cVP_CITY * city_count + cVP_CARD * victory_card_count
+
+let finish_move (board, player_list, turn, (color, curr_req)) = 
+  if victory_points_for_player board player_list color > cWIN_CONDITION
+  then ((Some (color)), (board, player_list, turn, ((next_turn color), curr_req)))
+  else (None, (board, player_list, turn, (color, ActionRequest))
+
 (* Remove item at index from list, thanks http://ocaml.org/learn/tutorials/99problems.html *)
 let rec remove_at n = function
   | [] -> []
@@ -196,7 +218,7 @@ let handle_move s m =
         let road = (color, (pt, p2)) in
         let new_board = (map, (structures, (road::curr_roads)), deck, disc, robber) in
         (* TODO: Determine what next request should be *)
-        (None, (new_board, player_list, turn, (color, curr_req)))
+        finish_move (new_board, player_list, turn, (color, curr_req))
       | _ -> failwith "Fill in valid moves"
     | RobberRequest ->
       match m' with
@@ -238,7 +260,7 @@ let handle_move s m =
         in let new_player_list = recreate_player_list player_list [] in
         let (mp, str, dk, trash, rbr) = board in
         let new_board = (mp, str, dk, trash, pt) in (* Update robber position *)
-        (None, (new_board, new_player_list, turn, (color, ActionRequest))) (* No one wins, but update state *)
+        finish_move (new_board, new_player_list, turn, (color, curr_req)) (* No one wins, but update state *)
       | _ -> failwith "Fill in valid moves"
     | DiscardRequest ->
       (* TODO: If resources < threshold, pass to next player *)
@@ -274,7 +296,7 @@ let handle_move s m =
           pendingtrade: None
         } in
         if not b then <> (* Trade rejected, try another move *)
-          (None, (board, player_list, new_turn_rcrd, (turn.active, ActionRequest)))
+          finish_move (board, player_list, new_turn_rcrd, (turn.active, curr_req))
         else (* Conduct trade *) let (clr, c1, c2) = turn.pendingtrade in
           (* Current player's resources checked in DomesticTrade action handler below *)
           let (cb1, cw1, co1, cg1, cl1) = c1 in
@@ -282,7 +304,7 @@ let handle_move s m =
           let (tcb, tcw, tco, tcg, tcl) = get_player_inventory player_list clr in 
           (* Check if target player has enough resources to satisfy trade *)
           if (tcb < cb2) || (tcw < cw2) || (tco < co2) || (tcg < cg2) || (tcl < cl2)
-          then (None, (board, player_list, new_turn_rcrd, (turn.active, ActionRequest)))
+          then finish_move (board, player_list, new_turn_rcrd, (turn.active, curr_req))
           else (* update inventories, save, outcome *)
             let new_p2_inventory = ((tcb - cb2 + cb1), (tcw - cw2 + cw1), (tco - co2 + co1), (tcg - cg2 + cg1), (tcl - cl2 + cl1)) in
             let (ccb, ccw, cco, ccg, ccl) = get_player_inventory player_list color in
@@ -297,7 +319,7 @@ let handle_move s m =
               tradesmade: (turn.tradesmade + 1);
               pendingtrade: None
             }
-            (None, (board, new_player_list', new_turn_rcrd_with_trade_count, (turn.active, ActionRequest)))
+            finish_move (board, new_player_list', new_turn_rcrd_with_trade_count, (turn.active, curr_req))
     | ActionRequest -> 
       match m' with
       | Action a ->
@@ -324,7 +346,7 @@ let handle_move s m =
               let first_hoarder_color = match List.hd hogs with
                 | (b, Some c) -> c
                 | _ -> failwith "Inconsistent results for hoaders"
-              in (None, (board, player_list, rolled_turn, (first_hoarder_color, DiscardRequest))) (* Send discard request *)
+              in finish_move (board, player_list, rolled_turn, (first_hoarder_color, DiscardRequest)) (* Send discard request *)
             else 
               let active_color = turn.active in
               let hex_corners = Util.piece_corners new_robber_loc in
@@ -340,7 +362,7 @@ let handle_move s m =
                   | Some (color, stlmt) -> if color <> active_color then Some color else adjacent_settlement_color t
                 | [] -> None
               in let adj_color = adjacent_settlement_color hex_corners in
-              (None, (board, player_list, rolled_turn, (color, RobberRequest)))
+              finish_move (board, player_list, rolled_turn, (color, RobberRequest))
           else (* Didn't roll robber, generate resources *)
             let activated_pieces = pieces_for_roll roll_num in
             let (mp, str, dk, dscrd, rbr) = board in
@@ -351,7 +373,7 @@ let handle_move s m =
                 players_helper t (new_player::acc)
               | [] -> List.rev acc
             in let new_player_list = players_helper player_list [] in
-            (None, (board, new_player_list, rolled_turn, (color, ActionRequest)))
+            finish_move (board, new_player_list, rolled_turn, (color, curr_req))
         | MaritimeTrade (resource1, resource2) -> 
           (* Get list of ports with settlements
              If list is blank, then trade at 4:1 ratio
@@ -375,7 +397,7 @@ let handle_move s m =
             | Grain -> if cg < trade_ratio then None else Some (cb, cw, co, (cg - trade_ratio), cl)
             | Lumber -> if cl < trade_ratio then None else Some (cb, cw, co, cg, (cl - trade_ratio))
           in match reduced_inventory with (* Perform trade, or exit if not enough r1 *)
-            | None -> (None, (board, player_list, turn, (color, ActionRequest)))
+            | None -> finish_move (board, player_list, turn, (color, curr_req))
             | Some (rb, rw, ro, rg, rl) -> let new_inventory = match resource2 with
                 | Brick -> ((rb + 1), rw, ro, rg, rl)
                 | Wool -> (rb, (rw + 1), ro, rg, rl)
@@ -383,9 +405,9 @@ let handle_move s m =
                 | Grain -> (rb, rw, ro, (rg + 1), rl)
                 | Lumber -> (rb, rw, ro, rg, (rl + 1))
               in let new_player_list = update_player_inventory player_list new_inventory color [] in
-              (None, (board, new_player_list, turn, (color, ActionRequest)))
+              finish_move (board, new_player_list, turn, (color, curr_req))
         | DomesticTrade (target_color, cost1, cost2) -> (* Need to check if max trades exceeded or if player has enough inventory *)
-          let bail_move = (None, (board, player_list, turn, (color, ActionRequest))) in
+          let bail_move = finish_move (board, player_list, turn, (color, curr_req)) in
           if turn.tradesmade > cNUM_TRADES_PER_TURN then bail_move
           else (* Check current player inventory *)
             let (cb, cw, co, cg, cl) = get_player_inventory player_list color in 
@@ -416,18 +438,18 @@ let handle_move s m =
               let curr_roads = snd str in
               let new_road_origin = fst (snd r) in
               if (not (current_player_has_road_at_point curr_roads color new_road_origin)) || ((current_roads_count_for_player curr_roads color) > cMAX_ROADS_PER_PLAYER)
-              then (None, (board, player_list, turn, (color, ActionRequest)))
+              then finish_move (board, player_list, turn, (color, curr_req))
               else (* Build road *)
                 let new_roads = curr_roads @ [r] in
                 let new_structures = ((fst str), new_roads) in
                 let new_board = (mp, new_structures, dk, dscrd, rbr) in
-                (None, new_board, new_player_list, turn, (color, ActionRequest))
+                finish_move (new_board, new_player_list, turn, (color, curr_req))
             | BuildTown (pt) -> if ((settlement_type_count_for_player Town board color) > cMAX_TOWNS_PER_PLAYER) || (is_adjacent_to_locations pt (all_settlement_locations board))
-              then (None, (board, player_list, turn, (color, ActionRequest))) (* Bail because invalid move *)
-              else (None, (add_settlement_at_point_for_player board Town pt color), player_list, turn, (color, ActionRequest)) (* Add town to board *)
+              then finish_move (board, player_list, turn, (color, curr_req)) (* Bail because invalid move *)
+              else finish_move ((add_settlement_at_point_for_player board Town pt color), player_list, turn, (color, curr_req)) (* Add town to board *)
             | BuildCity (pt) -> if ((settlement_type_count_for_player City board color) > cMAX_CITIES_PER_PLAYER) || not (has_settlement_type_at_point pt board Town color)
-              then (None, (board, player_list, turn, (color, ActionRequest))) (* Bail because invalid move *)
-              else (None, (add_settlement_at_point_for_player board City pt color), player_list, turn, (color, ActionRequest)) (* Add city to board *)
+              then finish_move (board, player_list, turn, (color, curr_req)) (* Bail because invalid move *)
+              else finish_move ((add_settlement_at_point_for_player board City pt color), player_list, turn, (color, curr_req)) (* Add city to board *)
             | BuildCard -> let (mp, str, dk, dscrd, rbr) = board in
               let card_deck = reveal dk in
               let index = Random.int (List.length card_deck) in
@@ -442,8 +464,8 @@ let handle_move s m =
                 tradesmade: turn.tradesmade;
                 pendingtrade: turn.pendingtrade;
               } in
-              (None, ((mp, str, remaining_deck, dscrd, rbr), new_player_list, new_turn, (color, ActionRequest))
-        | PlayCard pc -> if turn.cardplayed then (None, (board, player_list, turn, (color, ActionRequest))) else (* Only one dev card per turn *)
+              finish_move ((mp, str, remaining_deck, dscrd, rbr), new_player_list, new_turn, (color, curr_req))
+        | PlayCard pc -> if turn.cardplayed then finish_move (board, player_list, turn, (color, curr_req)) else (* Only one dev card per turn *)
           let new_turn_rcrd = {
             active: turn.active;
             dicerolled: turn.dicerolled;
@@ -462,7 +484,7 @@ let handle_move s m =
               | None -> [rd]
               | Some (other_road) -> [rd, other_road]
             in let new_roads = List.append rds roads_to_add in
-            (None, (board, player_list, new_turn_rcrd, (color, ActionRequest)))
+            finish_move (board, player_list, new_turn_rcrd, (color, curr_req))
           | PlayYearOfPlenty (rsrc, rsrcopt) -> 
             let (curr_clr, (curr_inv, curr_cards), curr_troph) = get_current_player player_list color in
             let update_inventory_for_type inv rsrc' = 
@@ -480,7 +502,7 @@ let handle_move s m =
               | Some (res') -> update_inventory_for_type inv' res'
             (* Put player list back together *)
             let new_player_list = update_player_inventory player_list final_inv color [] in
-            (None, (board, new_player_list, new_turn_rcrd, (color, ActionRequest)))
+            finish_move (board, new_player_list, new_turn_rcrd, (color, curr_req))
           | PlayMonopoly (res) ->
             let rec take_resources plist acc monopoly_count = match plist with  (* New player list, count of resource *)
               | (clr, (curr_inv, curr_cards), troph)::t -> if clr = color then take_resources t acc monopoly_count else
@@ -503,15 +525,15 @@ let handle_move s m =
               | Grain -> (cb, cw, co, (cg + spoils), cl)
               | Lumber -> (cb, cw, co, cg, (cl + spoils))
             in let new_players = update_player_inventory ruined_players new_inventory color [] in (* Rebuild player list *)
-            (None, (board, new_players, new_turn_rcrd, (color, ActionRequest)))
+            finish_move (board, new_players, new_turn_rcrd, (color, ActionRequest))
         | EndTurn -> 
             match turn.dicerolled with
             | Some _ -> (* Dice rolled, end turn *)
               let pending_cards = reveal turn.cardsbought in
               let new_turn_rcrd = new_turn (next_turn color) in
               let new_player_list = add_cards_for_player player_list color pending_cards in
-              let new_state = (board, new_player_list, new_turn_rcrd, ((next_turn color), ActionRequest)) in
-              (None, new_state)
+              let new_state = (board, new_player_list, new_turn_rcrd, ((next_turn color), curr_req)) in
+              finish_move new_state
             (* If no dice has been rolled, substitute dice roll move because dice roll is required for turn *)
             | None -> handle_move_helper (board, player_list, turn, (color, ActionRequest)) (Action(RollDice))
       | _ -> let next_action = (if turn.dicerolled = None then Action(RollDice) else Action(EndTurn)) in
