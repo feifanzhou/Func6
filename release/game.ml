@@ -13,12 +13,12 @@ let rec build_settlement_at_point curr_intersections clr stlmt p index acc =
   match curr_intersections with
   | h::t -> 
     if p = index 
-    then (build_settlement_at_point t clr stlmt p (index + 1) ((color, stlmt) :: acc)) 
+    then (build_settlement_at_point t clr stlmt p (index + 1) ((Some (clr, stlmt)) :: acc)) 
     else (build_settlement_at_point t clr stlmt p (index + 1) (None :: acc))
   | [] -> List.rev acc
 
 let rec get_current_player plist active_color = match plist with
-  | (clr, hnd, troph)::t -> if clr = active_color then (clr, hnd, troph) else get_current_player t
+  | (clr, hnd, troph)::t -> if clr = active_color then (clr, hnd, troph) else get_current_player t active_color
   | [] -> failwith "Couldn't find player for a color. Weird."
 let rec get_player_inventory plist active_color = 
   let (clr, (inv, crds), troph) = get_current_player plist active_color in
@@ -27,14 +27,14 @@ let rec get_player_inventory plist active_color =
 let rec update_player_inventory plist new_inventory active_color acc = match plist with
   | (clr, (curr_inv, curr_cards), troph)::t -> 
     if clr = active_color (* Is discarding player, update inventory in player list *)
-    then update_player_inventory t ((clr, (new_inventory, curr_cards), troph)::acc)
-    else update_player_inventory t ((clr, (curr_inv, curr_cards), troph)::acc)  (* Just put same entry back in *)
+    then update_player_inventory t new_inventory active_color ((clr, (new_inventory, curr_cards), troph)::acc)
+    else update_player_inventory t new_inventory active_color ((clr, (curr_inv, curr_cards), troph)::acc)  (* Just put same entry back in *)
   | [] -> List.rev acc (* Maintain player list order *)
 let rec update_player_trophies plist new_trophies active_color acc = match plist with
   | (clr, (curr_inv, curr_cards), troph)::t -> 
     if clr = active_color (* Is discarding player, update inventory in player list *)
-    then update_player_trophies t ((clr, (curr_inv, curr_cards), new_trophies)::acc)
-    else update_player_trophies t ((clr, (curr_inv, curr_cards), troph)::acc)  (* Just put same entry back in *)
+    then update_player_trophies t new_trophies active_color ((clr, (curr_inv, curr_cards), new_trophies)::acc)
+    else update_player_trophies t new_trophies active_color ((clr, (curr_inv, curr_cards), troph)::acc)  (* Just put same entry back in *)
   | [] -> List.rev acc (* Maintain player list order *)
 
 let ports_with_settlements port_list settlement_list active_color = 
@@ -43,7 +43,7 @@ let ports_with_settlements port_list settlement_list active_color =
       let itrx1 = List.nth settlement_list p1 in
       let itrx2 = List.nth settlement_list p2 in
       (* Check that intersection exists for either p1 or p2, and that the color matches the active color *)
-      if ((itrx1 <> None) && ((fst itrx1) = active_color)) || ((itrx2 <> None) && ((fst itrx2) = active_color))
+      if ((itrx1 <> None) && ((fst (get_some itrx1)) = active_color)) || ((itrx2 <> None) && ((fst (get_some itrx2)) = active_color))
       then match_finder t (((p1, p2), rtio, prtrsrc)::acc)
       else match_finder t acc
     | [] -> List.rev acc (* Maintain order *)
@@ -51,14 +51,14 @@ let ports_with_settlements port_list settlement_list active_color =
 
 let pieces_for_roll roll = match roll with
   | 2 -> [17]
-  | 3 -> [8, 15]
-  | 4 -> [3, 10]
-  | 5 -> [5, 16]
-  | 6 -> [4, 18]
-  | 8 -> [11, 12]
-  | 9 -> [2, 14]
-  | 10 -> [6, 13]
-  | 11 -> [0, 9]
+  | 3 -> [8; 15]
+  | 4 -> [3; 10]
+  | 5 -> [5; 16]
+  | 6 -> [4; 18]
+  | 8 -> [11; 12]
+  | 9 -> [2; 14]
+  | 10 -> [6; 13]
+  | 11 -> [0; 9]
   | 12 -> [1]
   | _ -> []
 
@@ -69,17 +69,17 @@ let new_resources_for_settlements piece_list intersections_list active_color rob
       let corners = piece_corners piece_pos in
       let rec corner_helper corner_list town_count city_count = match corner_list with
         | h'::t' -> let itrsc = List.nth intersections_list h' in (* Get settlement at every corner *)
-          match itrsc with
+          (match itrsc with
           | None -> corner_helper t' town_count city_count (* If no settlement, check next corner *)
           | Some (clr, stlmt) -> (* If there is a settlement *)
             if clr = active_color (* Check its color *)
             then match stlmt with
               | City -> corner_helper t' town_count (city_count + 1)
               | Town -> corner_helper t' (town_count + 1) city_count
-            else corner_helper t' town_count city_count (* Not active player's settlement *)
+            else corner_helper t' town_count city_count) (* Not active player's settlement *)
         | [] -> (* Move to next piece *)
           (* Calculate resource type and amount to add *)
-          let resource_bump = town_count * (settlement_num_resources Town) + city_count * (settlement_num_resources Count) in
+          let resource_bump = town_count * (settlement_num_resources Town) + city_count * (settlement_num_resources City) in
           let rsrc = resource_of_terrain (fst h) in
           match rsrc with
           | None -> helper t resources (* Pieie has no resources *)
@@ -95,18 +95,18 @@ let new_resources_for_settlements piece_list intersections_list active_color rob
   in helper piece_list (0, 0, 0, 0, 0)
 
 let current_cards_for_player plist active_color = match plist with (* Gives a list of cards *)
-  | (clr, (curr_inv, curr_cards), troph)::t -> match curr_cards with
+  | (clr, (curr_inv, curr_cards), troph)::t -> (match curr_cards with
     | Hidden (i) -> []
-    | Reveal (card_list) -> card_list
+    | Reveal (card_list) -> card_list)
   | [] -> []
 let update_cards_for_player plist active_color (new_cards : card list) = (* Gives back an updated player list *)
-  let rec helper acc = match plist with
+  let rec helper plist' acc = match plist' with
     | (clr, (curr_inv, (curr_cards : cards)), troph)::t -> 
       if clr = active_color (* Is discarding player, update inventory in player list *)
       then helper t ((clr, (curr_inv, (wrap_reveal new_cards)), troph)::acc)
       else helper t ((clr, (curr_inv, curr_cards), troph)::acc)  (* Just put same entry back in *)
     | [] -> List.rev acc (* Maintain player list order *)
-  in helper []
+  in helper plist []
 let add_cards_for_player plist active_color (additional_cards : card list) = (* Gives back an update player list *)
   let curr_cards = current_cards_for_player plist active_color in
   let new_cards = curr_cards @ additional_cards in
@@ -131,9 +131,9 @@ let all_settlement_locations brd =
   let itrs = fst strs in 
   (* Go through intersections *)
   let rec helper lst index acc = match lst with
-    | h::t -> match h with
+    | h::t -> (match h with
       | None -> helper t (index + 1) acc (* No settlement, check next intersection *)
-      | Some (clr, stlmt) -> helper t (index + 1) (index::acc) (* Found settlement, adding index to list *)
+      | Some (clr, stlmt) -> helper t (index + 1) (index::acc)) (* Found settlement, adding index to list *)
     | [] -> List.rev acc (* Maintain order, because why not *)
   in helper itrs 0 []
 let settlement_points_of_type_for_player stlmt_type brd active_color = (* List of points *)
@@ -141,11 +141,11 @@ let settlement_points_of_type_for_player stlmt_type brd active_color = (* List o
   let itrs = fst strs in
   (* Go through intersections *)
   let rec helper lst acc index = match lst with
-    | h::t -> match h with
-      | None -> helper t acc
-      | Some (clr, stlmt) -> if (stlmt = stlmt_type) && (clr = active_col) then helper t (index::acc) (index + 1) else helper t acc (index + 1)
+    | h::t -> (match h with
+      | None -> helper t acc (index + 1)
+      | Some (clr, stlmt) -> if (stlmt = stlmt_type) && (clr = active_color) then helper t (index::acc) (index + 1) else helper t acc (index + 1))
     | [] -> List.rev acc (* Maintain order *)
-  in helper itrs []
+  in helper itrs [] 0
 let has_settlement_type_at_point pt board stlmt_type active_color = 
   let curr_locs = settlement_points_of_type_for_player stlmt_type board active_color in
   List.exists (fun p -> p = pt) curr_locs
@@ -187,9 +187,9 @@ let victory_card_count_for_player plist active_color = let curr_player = get_cur
   let (clr, (curr_inv, curr_crds), troph) = curr_player in
   let card_list = reveal curr_crds in
   let rec card_list_helper clist count = match clist with
-    | h::t -> match h with
+    | h::t -> (match h with
       | VictoryPoint -> card_list_helper t (count + 1)
-      | _ -> card_list_helper t count
+      | _ -> card_list_helper t count)
     | [] -> count
   in card_list_helper card_list 0
 let victory_points_for_player board plist active_color = 
@@ -200,7 +200,7 @@ let victory_points_for_player board plist active_color =
   let victory_card_count = victory_card_count_for_player plist active_color in
   let longest_road_count = if r then 1 else 0 in
   let largest_army_count = if a then 1 else 0 in
-  total_points = cVP_TOWN * town_count + cVP_CITY * city_count + cVP_CARD * victory_card_count + cVP_LONGEST_ROAD * longest_road_count + cVP_LARGEST_ARMY * largest_army_count
+  cVP_TOWN * town_count + cVP_CITY * city_count + cVP_CARD * victory_card_count + cVP_LONGEST_ROAD * longest_road_count + cVP_LARGEST_ARMY * largest_army_count
 
 let finish_move (board, player_list, turn, (color, curr_req)) = 
   if victory_points_for_player board player_list color > cWIN_CONDITION
@@ -221,7 +221,7 @@ let handle_move s m =
     let (board, player_list, turn, (color, curr_req)) = s' in
     match curr_req with
     | InitialRequest ->
-      match m' with 
+      (match m' with 
       | InitialMove (p1, p2) -> (* TODO: Check if p1 is too close to existing settlement *)
         let pt = if (p1 > cMAX_POINT_NUM) || (p1 < cMIN_POINT_NUM) then Random.int cMAX_POINT_NUM else p1 in
         let (map, (curr_intrs, curr_roads), deck, disc, robber) = board in
@@ -230,9 +230,9 @@ let handle_move s m =
         let new_board = (map, (structures, (road::curr_roads)), deck, disc, robber) in
         (* TODO: Determine what next request should be *)
         finish_move (new_board, player_list, turn, (color, curr_req))
-      | _ -> failwith "Fill in valid moves"
+      | _ -> failwith "Fill in valid moves")
     | RobberRequest ->
-      match m' with
+      (match m' with
       | RobberMove (pt, adj_color) ->
         (* Rob target player *)
         let rec rob_player plist target_color = match plist with (* Take resource from chosen player *)
@@ -272,7 +272,7 @@ let handle_move s m =
         let (mp, str, dk, trash, rbr) = board in
         let new_board = (mp, str, dk, trash, pt) in (* Update robber position *)
         finish_move (new_board, new_player_list, turn, (color, curr_req)) (* No one wins, but update state *)
-      | _ -> failwith "Fill in valid moves"
+      | _ -> failwith "Fill in valid moves")
     | DiscardRequest ->
       (* TODO: If resources < threshold, pass to next player *)
       let rec get_current_player_resource_count plist = match plist with
@@ -285,7 +285,7 @@ let handle_move s m =
       if curr_resource_count <= cMAX_HAND_SIZE (* No need to discard, try next player *)
       then (None, (board, player_list, turn, ((next_turn color), DiscardRequest)))
       else (* Current player needs to discard *)
-        match m' with
+        (match m' with
         | DiscardMove (cost_b, cost_w, cost_o, cost_g, cost_l) ->
           let (curr_clr, (curr_inv, curr_cards), curr_troph) = get_current_player player_list color in
           let (curr_b, curr_w, curr_o, curr_g, curr_l) = curr_inv in
@@ -295,8 +295,8 @@ let handle_move s m =
           if color <> White (* Not last player in order, get next one to try discarding resources *)
           then (None, (board, new_player_list, turn, ((next_turn color), DiscardRequest)))
           else (None, (board, new_player_list, turn, (turn.active, RobberRequest))) (* Pass control back to active player with RobberRequest *)
-        | _ -> failwith "TODO: Fill in valid moves"
-    | TradeRequest -> match m' with
+        | _ -> failwith "TODO: Fill in valid moves")
+    | TradeRequest -> (match m' with
       | TradeResponse b -> 
         let new_turn_rcrd = {
           active = turn.active;
@@ -331,9 +331,9 @@ let handle_move s m =
               pendingtrade = None
             } in
             finish_move (board, new_player_list', new_turn_rcrd_with_trade_count, (turn.active, curr_req))
-      | _ -> failwith "TODO: Minimum viable move"
+      | _ -> failwith "TODO: Minimum viable move")
     | ActionRequest -> 
-      match m' with
+      (match m' with
       | Action a ->
         match a with (* TODO: Sub rolldice move if turn.dicerolled = None *)
         | RollDice -> let roll_num = Util.random_roll () in
@@ -575,7 +575,7 @@ let handle_move s m =
             (* If no dice has been rolled, substitute dice roll move because dice roll is required for turn *)
             | None -> handle_move_helper (board, player_list, turn, (color, ActionRequest)) (Action(RollDice))
       | _ -> let next_action = (if turn.dicerolled = None then Action(RollDice) else Action(EndTurn)) in
-             handle_move (board, player_list, turn, (color, ActionRequest)) (next_action)
+             handle_move (board, player_list, turn, (color, ActionRequest)) (next_action))
   in handle_move_helper s m
 
 let presentation s = let (board, player_list, turn, (color, curr_req)) = s in
