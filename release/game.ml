@@ -49,20 +49,23 @@ let ports_with_settlements port_list settlement_list active_color =
     | [] -> List.rev acc (* Maintain order *)
   in match_finder port_list []
 
-let pieces_for_roll roll = match roll with
-  | 2 -> [17]
-  | 3 -> [8; 15]
-  | 4 -> [3; 10]
-  | 5 -> [5; 16]
-  | 6 -> [4; 18]
-  | 8 -> [11; 12]
-  | 9 -> [2; 14]
-  | 10 -> [6; 13]
-  | 11 -> [0; 9]
-  | 12 -> [1]
+let pieces_for_roll map roll = 
+  let (hx, _) = map in
+  let hexes = hx in
+  match roll with (* Returns hex list *)
+  | 2 -> [List.nth hx 17]
+  | 3 -> [List.nth hx 8; List.nth hx 15]
+  | 4 -> [List.nth hx 3; List.nth hx 10]
+  | 5 -> [List.nth hx 5; List.nth hx 16]
+  | 6 -> [List.nth hx 4; List.nth hx 18]
+  | 8 -> [List.nth hx 11; List.nth hx 12]
+  | 9 -> [List.nth hx 2; List.nth hx 14]
+  | 10 -> [List.nth hx 6; List.nth hx 13]
+  | 11 -> [List.nth hx 0; List.nth hx 9]
+  | 12 -> [List.nth hx 1]
   | _ -> []
 
-let new_resources_for_settlements piece_list intersections_list active_color robber_pos = (* Need count of towns and cities for active player *)
+let new_resources_for_settlements hex_list intersections_list active_color robber_pos = (* Need count of towns and cities for active player *)
   let rec helper pc_list (resources : cost) = match pc_list with (* For every piece, get its corners *)
     | h::t -> let piece_pos = snd h in
       if robber_pos = piece_pos then helper t resources else (* Skip robber piece *)
@@ -92,7 +95,7 @@ let new_resources_for_settlements piece_list intersections_list active_color rob
             | Lumber -> helper t (rb, rw, ro, rg, (rl + resource_bump))
       in corner_helper corners 0 0
     | [] -> resources
-  in helper piece_list (0, 0, 0, 0, 0)
+  in helper hex_list (0, 0, 0, 0, 0)
 
 let current_cards_for_player plist active_color = match plist with (* Gives a list of cards *)
   | (clr, (curr_inv, curr_cards), troph)::t -> (match curr_cards with
@@ -137,8 +140,10 @@ let all_settlement_locations brd =
     | [] -> List.rev acc (* Maintain order, because why not *)
   in helper itrs 0 []
 let settlement_points_of_type_for_player stlmt_type brd active_color = (* List of points *)
-  let strs = snd brd in
-  let itrs = fst strs in
+  let (mp, str, dk, dscrd, rbr) = brd in
+  let strs = str in
+  let (irs, rds) = strs in
+  let itrs = irs in
   (* Go through intersections *)
   let rec helper lst acc index = match lst with
     | h::t -> (match h with
