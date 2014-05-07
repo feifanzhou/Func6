@@ -202,7 +202,8 @@ let victory_points_for_player board plist active_color =
   let largest_army_count = if a then 1 else 0 in
   cVP_TOWN * town_count + cVP_CITY * city_count + cVP_CARD * victory_card_count + cVP_LONGEST_ROAD * longest_road_count + cVP_LARGEST_ARMY * largest_army_count
 
-let finish_move (board, player_list, turn, (color, curr_req)) = 
+let finish_move s = 
+  let (board, player_list, turn, (color, curr_req)) = s in
   if victory_points_for_player board player_list color > cWIN_CONDITION
   then ((Some (color)), (board, player_list, turn, ((next_turn color), curr_req)))
   else (None, (board, player_list, turn, (color, ActionRequest)))
@@ -229,15 +230,18 @@ let handle_move s m =
         let road = (color, (pt, p2)) in
         let new_board = (map, (structures, (road::curr_roads)), deck, disc, robber) in
         (* TODO: Determine what next request should be *)
-        finish_move (new_board, player_list, turn, (color, curr_req))
+        (* TODO: Figure out why s' doesn't work *)
+        finish_move s (* (new_board, player_list, turn, (color, curr_req)) *)
       | _ -> failwith "Fill in valid moves")
     | RobberRequest ->
       (match m' with
       | RobberMove (pt, adj_color) ->
+        if adj_color = None then finish_move s else
         (* Rob target player *)
-        let rec rob_player plist target_color = match plist with (* Take resource from chosen player *)
+        let target_color = get_some adj_color in
+        let rec rob_player plist tcolor = match plist with (* Take resource from chosen player *)
           | h::t -> let (clr, ((b, w, o, g, l), crds), trophs) = h in
-            if clr <> target_color then rob_player t target_color else
+            if clr <> tcolor then rob_player t tcolor else
             (* Tuple with cost, and an option saying if something was able to be robbed *)
             if b > 0 then ((b - 1, w, o, g, l), Some Brick)
             else if w > 0 then ((b, w - 1, o, g, l), Some Wool)
@@ -245,33 +249,34 @@ let handle_move s m =
             else if g > 0 then ((b, w, o, g - 1, l), Some Grain)
             else if l > 0 then ((b, w, o, g, l - 1), Some Lumber)
             else ((b, w, o, g, l), None)
-          | [] -> rob_player player_list (next_turn clr) (* Try to rob someone else *)
-        in let rob_result = rob_player player_list adj_color in (* Tuple of robbed results and the type that was robbed *)
+          | [] -> rob_player player_list (next_turn target_color) (* Try to rob someone else *)
+        in let rob_result = rob_player player_list target_color in (* Tuple of robbed results and the type that was robbed *)
         (* Benefit current player *)
         let rec reap_robber_rewards plist = match plist with (* Add taken resource to current player *)
           | h::t -> let (clr, ((b, w, o, g, l), crds), trophs) = h in
-            if clr <> active_color then rob_player t else
-            match (snd rob_result) with
+            if clr <> color then reap_robber_rewards t else
+            (match (snd rob_result) with
             | None -> (b, w, o, g, l) (* Nothing could be robbed *)
             | Some Brick -> (b + 1, w, o, g, l)
             | Some Wool -> (b, w + 1, o, g, l)
             | Some Ore -> (b, w, o + 1, g, l)
             | Some Grain -> (b, w, o, g + 1, l)
-            | Some Lumber -> (b, w, o, g, l + 1)
+            | Some Lumber -> (b, w, o, g, l + 1))
           | [] -> failwith "Player for current color couldn't be found"
         in let reap_result = reap_robber_rewards player_list in (* Robbed resource added to current player's resources *)
         (* Generate new state *)
         let rec recreate_player_list plist acc = match plist with
           | h::t -> let (clr, (invtr, crds), trophs) = h in
-            if clr <> active_color && clr <> adj_color then recreate_player_list t (h::acc) (* Add current player to new list *)
-            else if clr = active_color then recreate_player_list t ((clr, (reap_result, crds), trophs)::acc) (* Add current player to new list *)
-            else if clr = adj_color then recreate_player_list t ((clr, ((fst rob_result), crds), trophs)::acc) (* Add robbed player to new list *)
+            if clr <> target_color && clr <> color then recreate_player_list t (h::acc) (* Add current player to new list *)
+            else if clr = color then recreate_player_list t ((clr, (reap_result, crds), trophs)::acc) (* Add current player to new list *)
+            else if clr = target_color then recreate_player_list t ((clr, ((fst rob_result), crds), trophs)::acc) (* Add robbed player to new list *)
             else failwith "Something wrong with player list and colors"
           | [] -> List.rev acc (* Everything had been reversed in accumulator, so reversing to get it back *)
         in let new_player_list = recreate_player_list player_list [] in
         let (mp, str, dk, trash, rbr) = board in
         let new_board = (mp, str, dk, trash, pt) in (* Update robber position *)
-        finish_move (new_board, new_player_list, turn, (color, curr_req)) (* No one wins, but update state *)
+        (* TODO: Figure out why finish move isn't workin *)
+        finish_move s (* (new_board, new_player_list, turn, (color, curr_req)) *) (* No one wins, but update state *)
       | _ -> failwith "Fill in valid moves")
     | DiscardRequest ->
       (* TODO: If resources < threshold, pass to next player *)
@@ -283,7 +288,7 @@ let handle_move s m =
         | [] -> failwith "Couldn't find requested player color. Weird"
       in let curr_resource_count = get_current_player_resource_count player_list in
       if curr_resource_count <= cMAX_HAND_SIZE (* No need to discard, try next player *)
-      then (None, (board, player_list, turn, ((next_turn color), DiscardRequest)))
+      then s (* TODO: Output issue (None, (board, player_list, turn, ((next_turn color), DiscardRequest))) *)
       else (* Current player needs to discard *)
         (match m' with
         | DiscardMove (cost_b, cost_w, cost_o, cost_g, cost_l) ->
