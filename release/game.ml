@@ -43,7 +43,7 @@ let ports_with_settlements port_list settlement_list active_color =
       let itrx1 = List.nth settlement_list p1 in
       let itrx2 = List.nth settlement_list p2 in
       (* Check that intersection exists for either p1 or p2, and that the color matches the active color *)
-      if ((itrx1 <> None) && ((fst itrx1) = active_color)) || ((itrx2 <> None) && ((fst itrx2) = active_color)
+      if ((itrx1 <> None) && ((fst itrx1) = active_color)) || ((itrx2 <> None) && ((fst itrx2) = active_color))
       then match_finder t (((p1, p2), rtio, prtrsrc)::acc)
       else match_finder t acc
     | [] -> List.rev acc (* Maintain order *)
@@ -65,7 +65,7 @@ let pieces_for_roll roll = match roll with
 let new_resources_for_settlements piece_list intersections_list active_color robber_pos = (* Need count of towns and cities for active player *)
   let rec helper pc_list (resources : cost) = match pc_list with (* For every piece, get its corners *)
     | h::t -> let piece_pos = snd h in
-      if robber_pos = piece_pos then helper t total_town_count total_city_count else (* Skip robber piece *)
+      if robber_pos = piece_pos then helper t resources else (* Skip robber piece *)
       let corners = piece_corners piece_pos in
       let rec corner_helper corner_list town_count city_count = match corner_list with
         | h'::t' -> let itrsc = List.nth intersections_list h' in (* Get settlement at every corner *)
@@ -90,6 +90,7 @@ let new_resources_for_settlements piece_list intersections_list active_color rob
             | Ore -> helper t (rb, rw, (ro + resource_bump), rg, rl)
             | Grain -> helper t (rb, rw, ro, (rg + resource_bump), rl)
             | Lumber -> helper t (rb, rw, ro, rg, (rl + resource_bump))
+      in corner_helper corners 0 0
     | [] -> resources
   in helper piece_list (0, 0, 0, 0, 0)
 
@@ -105,6 +106,7 @@ let update_cards_for_player plist active_color (new_cards : card list) = (* Give
       then helper t ((clr, (curr_inv, (wrap_reveal new_cards)), troph)::acc)
       else helper t ((clr, (curr_inv, curr_cards), troph)::acc)  (* Just put same entry back in *)
     | [] -> List.rev acc (* Maintain player list order *)
+  in helper []
 let add_cards_for_player plist active_color (additional_cards : card list) = (* Gives back an update player list *)
   let curr_cards = current_cards_for_player plist active_color in
   let new_cards = curr_cards @ additional_cards in
@@ -154,11 +156,12 @@ let is_adjacent_to_locations req_point locs =
       let rec subhelper lcs' = match lcs' with
         | h::t -> if h = req_point then true else subhelper t
         | [] -> helper t (* Nothing on this loc, try next one *)
+      in subhelper adj_points
     | [] -> false (* None of the locs matched *)
   in helper locs
 let settlement_type_count_for_player stlmt_type brd active_color = List.length (settlement_points_of_type_for_player stlmt_type brd active_color)
 
-let replace_at lst n new_obj = 
+let replace_at lst n new_obj =  
   let rec helper lst' n' acc = match lst' with
     | h::t -> if n' = 0 then helper t (n - 1) (new_obj::acc) else helper t (n - 1) (h::acc)
     | [] -> List.rev acc
@@ -202,7 +205,7 @@ let victory_points_for_player board plist active_color =
 let finish_move (board, player_list, turn, (color, curr_req)) = 
   if victory_points_for_player board player_list color > cWIN_CONDITION
   then ((Some (color)), (board, player_list, turn, ((next_turn color), curr_req)))
-  else (None, (board, player_list, turn, (color, ActionRequest))
+  else (None, (board, player_list, turn, (color, ActionRequest)))
 
 (* Remove item at index from list, thanks http://ocaml.org/learn/tutorials/99problems.html *)
 let rec remove_at n = function
@@ -292,8 +295,8 @@ let handle_move s m =
           if color <> White (* Not last player in order, get next one to try discarding resources *)
           then (None, (board, new_player_list, turn, ((next_turn color), DiscardRequest)))
           else (None, (board, new_player_list, turn, (turn.active, RobberRequest))) (* Pass control back to active player with RobberRequest *)
-        | _ -> failwith "Fill in valid moves"
-    | TradeRequest ->
+        | _ -> failwith "TODO: Fill in valid moves"
+    | TradeRequest -> match m' with
       | TradeResponse b -> 
         let new_turn_rcrd = {
           active: turn.active;
@@ -328,6 +331,7 @@ let handle_move s m =
               pendingtrade: None
             }
             finish_move (board, new_player_list', new_turn_rcrd_with_trade_count, (turn.active, curr_req))
+      | _ -> failwith "TODO: Minimum viable move"
     | ActionRequest -> 
       match m' with
       | Action a ->
