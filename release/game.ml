@@ -30,6 +30,12 @@ let rec update_player_inventory plist new_inventory active_color acc = match pli
     then update_player_inventory t ((clr, (new_inventory, curr_cards), troph)::acc)
     else update_player_inventory t ((clr, (curr_inv, curr_cards), troph)::acc)  (* Just put same entry back in *)
   | [] -> List.rev acc (* Maintain player list order *)
+let rec update_player_trophies plist new_trophies active_color acc = match plist with
+  | (clr, (curr_inv, curr_cards), troph)::t -> 
+    if clr = active_color (* Is discarding player, update inventory in player list *)
+    then update_player_trophies t ((clr, (curr_inv, curr_cards), new_trophies)::acc)
+    else update_player_trophies t ((clr, (curr_inv, curr_cards), troph)::acc)  (* Just put same entry back in *)
+  | [] -> List.rev acc (* Maintain player list order *)
 
 let ports_with_settlements port_list settlement_list active_color = 
   let rec match_finder prtlst acc = match prtlst with
@@ -185,11 +191,14 @@ let victory_card_count_for_player plist active_color = let curr_player = get_cur
   in card_list_helper card_list 0
 let victory_points_for_player board plist active_color = 
   (* Victory points come from towns, cities, victory cards, and trophies *)
+  let (_, _, (k, r, a)) = get_current_player plist active_color in
   let town_count = settlement_type_count_for_player Town board active_color in
   let city_count = settlement_type_count_for_player City board active_color in
   let victory_card_count = victory_card_count_for_player plist active_color in
+  let longest_road_count = if r then 1 else 0 in
+  let largest_army_count = if a then 1 else 0 in
   (* TODO: Handle trophies *)
-  total_points = cVP_TOWN * town_count + cVP_CITY * city_count + cVP_CARD * victory_card_count
+  total_points = cVP_TOWN * town_count + cVP_CITY * city_count + cVP_CARD * victory_card_count + cVP_LONGEST_ROAD * longest_road_count + cVP_LARGEST_ARMY * largest_army_count
 
 let finish_move (board, player_list, turn, (color, curr_req)) = 
   if victory_points_for_player board player_list color > cWIN_CONDITION
@@ -443,6 +452,20 @@ let handle_move s m =
                 let new_roads = curr_roads @ [r] in
                 let new_structures = ((fst str), new_roads) in
                 let new_board = (mp, new_structures, dk, dscrd, rbr) in
+                (* Check for longest road trophy *)
+                let (clr, hnd, troph) = get_current_player player_list color in
+                let (k, r, a) = troph in
+                let road_lengths = [ (* Using curr_roads because of first no tie *)
+                                    longest_road Blue curr_roads (fst str);
+                                    longest_road Red curr_roads (fst str);
+                                    longest_road Orange curr_roads (fst str);
+                                    longest_road White curr_roads (fst str);
+                                    ] in
+                let cur_road_length = longest_road color new_roads (fst str) in
+                let is_longest_road = cur_road_length > List.nth road_lengths 0 && cur_road_length > List.nth road_lengths 1 && cur_road_length > List.nth road_lengths 2 && cur_road_length > List.nth road_lengths 3 in
+                let over_threshold = cur_road_length >= cMIN_LONGEST_ROAD in
+                let new_trophies = if is_longest_road && over_threshold then (k, true, a) else (k, false, a) in
+                let new_player_list = update_player_trophies player_list new_trophies color [] in
                 finish_move (new_board, new_player_list, turn, (color, curr_req))
             | BuildTown (pt) -> if ((settlement_type_count_for_player Town board color) > cMAX_TOWNS_PER_PLAYER) || (is_adjacent_to_locations pt (all_settlement_locations board))
               then finish_move (board, player_list, turn, (color, curr_req)) (* Bail because invalid move *)
@@ -476,8 +499,20 @@ let handle_move s m =
           } in
           (* TODO: Decrement player's hand *)
           (* TODO: Add cards to discarded pile *)
-          match pc with (* TODO: Something about knights and army size? *)
-          | PlayKnight (rbrmv) -> handle_move_helper (board, player_list, new_turn_rcrd, (color, RobberRequest)) (RobberMove(rbrmv))
+          match pc with
+          | PlayKnight (rbrmv) -> let (clr, hnd, troph) = get_current_player player_list color in
+            let (k, r, a) = troph in
+            let new_knight_count = k in
+            let over_threshold = k >= cMIN_LARGEST_ARMY in
+            let is_largest_army = 
+              let rec army_helper plist = match plist with
+                | h::t -> let (_, _, (k', r', a')) = h in
+                  if k' >= new_knight_count then false else army_helper t
+                | [] -> true
+              in army_helper player_list in
+            let new_trophies = if is_largest_army && over_threshold then (new_knight, r, true) else (new_knight, r, false) in
+            let new_player_list = update_player_trophies player_list new_trophies color [] in
+            handle_move_helper (board, new_player_list, new_turn_rcrd, (color, RobberRequest)) (RobberMove(rbrmv))
           | PlayRoadBuilding (rd, rdopt) ->
             let (mp, (intrs, rds), dk, dsc, rbr) = board in
             let roads_to_add = match rdopt with
